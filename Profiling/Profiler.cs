@@ -25,7 +25,8 @@ namespace Morgott.Preloader.Profiling
         private static int _worldExported;
         private static volatile bool _menuReached;
 
-        private static string OutputDir => Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader");
+        /// <summary>BepInEx\Morgott.Preloader: every profiler/probe output file.</summary>
+        internal static string OutputDir => Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader");
 
         public static void Begin()
         {
@@ -44,9 +45,7 @@ namespace Morgott.Preloader.Profiling
             PluginLifecycleProfiler.ChainloaderInitialized += OnChainloaderInitialized;
             PluginLifecycleProfiler.ChainloaderStarted += () => Log.Guard("Jotunn probe install", () => JotunnProbe.Install(_harmony));
             if (Config.ProfilerTimeModPatches.Value)
-            {
                 PluginLifecycleProfiler.ChainloaderStarted += () => Log.Guard("Patch owner probe install", () => PatchOwnerProbe.Install(_harmony));
-            }
             Log.Info("Profiler: preloader hooks installed");
         }
 
@@ -56,52 +55,38 @@ namespace Morgott.Preloader.Profiling
         {
             Log.Guard("Bundle profiler install", () => BundleProfiler.Install(_harmony));
             Log.Guard("Game probe install", () => GameLifecycleProbe.Install(_harmony));
-            GameLifecycleProbe.MenuReady += OnMenuReady;
-            GameLifecycleProbe.WorldReady += OnWorldReady;
+            GameLifecycleProbe.MenuReady += () =>
+            {
+                _menuReached = true;
+                Report(StartupTrace.Snapshot, "main menu ready", "menu ready", ""); // recording goes on until the first spawn
+            };
+            GameLifecycleProbe.WorldReady += () => Report(StartupTrace.StopAndSnapshot, "first player spawn", "first spawn", "-world");
             Application.quitting += OnQuitting;
         }
 
-        /// <summary>Menu profile from a snapshot; recording goes on until the first player spawn.</summary>
-        private static void OnMenuReady()
+        /// <summary>One log line now, files off the main thread (the snapshot is a copy).</summary>
+        private static void Report(Func<List<TraceEvent>> snapshot, string reason, string endLabel, string suffix)
         {
-            long now = StartupTrace.Now();
-            List<TraceEvent> events = StartupTrace.Snapshot();
-            double menuReadyMs = StartupTrace.ToMs(now);
-            _menuReached = true;
-            Log.Info(TraceReport.OneLine(events, menuReadyMs, "menu ready"));
-            // File output off the main thread; the snapshot is a copy.
-            ThreadPool.QueueUserWorkItem(_ => Export(events, menuReadyMs, "main menu ready", "menu ready", ""));
-        }
-
-        private static void OnWorldReady()
-        {
-            long now = StartupTrace.Now();
-            List<TraceEvent> events = StartupTrace.StopAndSnapshot();
-            double spawnMs = StartupTrace.ToMs(now);
-            Log.Info(TraceReport.OneLine(events, spawnMs, "first spawn"));
-            ThreadPool.QueueUserWorkItem(_ => Export(events, spawnMs, "first player spawn", "first spawn", "-world"));
+            double endMs = StartupTrace.ToMs(StartupTrace.Now());
+            List<TraceEvent> events = snapshot();
+            Log.Info(TraceReport.OneLine(events, endMs, endLabel));
+            ThreadPool.QueueUserWorkItem(_ => Export(events, endMs, reason, endLabel, suffix));
         }
 
         /// <summary>Quit before the first spawn (crash-free exit mid-startup): write what was recorded, synchronously.</summary>
         private static void OnQuitting()
         {
-            if (!StartupTrace.Recording)
-            {
-                return;
-            }
-            long now = StartupTrace.Now();
+            if (!StartupTrace.Recording) return;
+            double now = StartupTrace.ToMs(StartupTrace.Now());
             bool menu = _menuReached;
-            Export(StartupTrace.StopAndSnapshot(), StartupTrace.ToMs(now), menu ? "quit before first spawn (partial trace)" : "quit before main menu (partial trace)",
+            Export(StartupTrace.StopAndSnapshot(), now, menu ? "quit before first spawn (partial trace)" : "quit before main menu (partial trace)",
                 "quit", menu ? "-world" : "");
         }
 
         /// <summary>Menu profile: trace.json + summary.txt; world profile (process start -> first spawn): trace-world.json + summary-world.txt.</summary>
         private static void Export(List<TraceEvent> events, double endMs, string reason, string endLabel, string suffix)
         {
-            if (Interlocked.Exchange(ref suffix.Length == 0 ? ref _menuExported : ref _worldExported, 1) != 0)
-            {
-                return;
-            }
+            if (Interlocked.Exchange(ref suffix.Length == 0 ? ref _menuExported : ref _worldExported, 1) != 0) return;
             Log.Guard("Trace export", () =>
             {
                 string header = $"Morgott.Preloader startup profile - {DateTime.Now:yyyy-MM-dd HH:mm:ss} - {reason} - {events.Count} events";
