@@ -17,6 +17,7 @@
     <!-- The real Unity-free sources, not copies. -->
     <Compile Include="..\BundleCache\LzmaDecoder.cs" Link="src\LzmaDecoder.cs" />
     <Compile Include="..\BundleCache\BundleHeader.cs" Link="src\BundleHeader.cs" />
+    <Compile Include="..\Core\Hash.cs" Link="src\Hash.cs" />
     <None Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
