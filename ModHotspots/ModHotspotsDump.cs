@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using BepInEx;
 using Morgott.Preloader.Core;
@@ -11,9 +11,8 @@ namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
     /// <c>[Diagnostics] DumpModHotspots</c>: at the main menu, writes the state the ModHotspots replacements produce to
-    /// BepInEx\Morgott.Preloader\modhotspots-state.txt, so a run with a toggle off can be diffed against a run with it on.
-    /// ShaderReplacer: every material of every registered GameObject (any helper variant) with its shader, identified
-    /// by name and position among the loaded shaders of that name.
+    /// BepInEx\Morgott.Preloader\modhotspots-state.txt, for diffing a toggle off against on. ShaderReplacer: every material
+    /// of every registered GameObject (any helper variant) with its shader, as name + index among the loaded shaders of that name.
     /// </summary>
     internal static class ModHotspotsDump
     {
@@ -22,28 +21,17 @@ namespace Morgott.Preloader.ModHotspots
             Lifecycle.MenuReady += () => Log.Guard("ModHotspots state dump", Write);
             Lifecycle.ChainloaderStarted += () => Log.Guard("ModHotspots VNEI dump", () =>
             {
-                if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(VneiIndexingFix.Guid))
-                {
-                    InstallVnei(harmony);
-                }
+                if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(VneiIndexingFix.Guid)) InstallVnei(harmony);
             });
         }
 
         // VneiDump references VNEI types: only JIT-compiled once VNEI is known to be loaded.
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        [MethodImpl(MethodImplOptions.NoInlining)]
         private static void InstallVnei(Harmony harmony) => VneiDump.Install(harmony);
 
         private static void Write()
         {
             var sb = new StringBuilder();
-            WriteShaderReplacers(sb);
-            string path = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "modhotspots-state.txt");
-            AtomicFile.WriteAllText(path, sb.ToString());
-            Log.Info($"ModHotspots state written to {path}");
-        }
-
-        private static void WriteShaderReplacers(StringBuilder sb)
-        {
             var groups = new Dictionary<Shader, string>();
             var counts = new Dictionary<string, int>();
             foreach (Shader shader in Resources.FindObjectsOfTypeAll<Shader>())
@@ -55,13 +43,10 @@ namespace Morgott.Preloader.ModHotspots
             Patches info = Harmony.GetPatchInfo(AccessTools.DeclaredMethod(typeof(FejdStartup), "Awake"));
             foreach (Patch patch in info?.Postfixes ?? new List<Patch>().AsReadOnly())
             {
-                FieldInfo field = patch.PatchMethod.Name == "ReplaceShaderPatch"
-                    ? AccessTools.DeclaredField(patch.PatchMethod.DeclaringType, "GOToSwap")
+                var gameObjects = patch.PatchMethod.Name == "ReplaceShaderPatch"
+                    ? AccessTools.DeclaredField(patch.PatchMethod.DeclaringType, "GOToSwap")?.GetValue(null) as List<GameObject>
                     : null;
-                if (!(field?.GetValue(null) is List<GameObject> gameObjects))
-                {
-                    continue;
-                }
+                if (gameObjects == null) continue;
                 sb.Append("== ShaderReplacer ").Append(patch.PatchMethod.DeclaringType?.FullName)
                   .Append(" [").Append(patch.PatchMethod.DeclaringType?.Assembly.GetName().Name).Append("] ")
                   .Append(gameObjects.Count).Append(" objects\n");
@@ -90,15 +75,15 @@ namespace Morgott.Preloader.ModHotspots
                     }
                 }
             }
+            string path = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "modhotspots-state.txt");
+            AtomicFile.WriteAllText(path, sb.ToString());
+            Log.Info($"ModHotspots state written to {path}");
         }
 
         private static string RelPath(Transform t, Transform root)
         {
             string path = t.name;
-            for (Transform p = t.parent; t != root && p != null && p != root; p = p.parent)
-            {
-                path = p.name + "/" + path;
-            }
+            for (Transform p = t.parent; t != root && p != null && p != root; p = p.parent) path = p.name + "/" + path;
             return path;
         }
     }

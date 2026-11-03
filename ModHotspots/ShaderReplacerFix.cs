@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Morgott.Preloader.Core;
 using HarmonyLib;
@@ -8,42 +9,28 @@ using UnityEngine;
 namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
-    /// blacks7ar's ShaderReplacer helper (Harmony ID <c>blacks7ar.utilities.ShaderReplacer</c>, embedded in OreMines
-    /// and others): its <c>ReplaceShaderPatch</c> postfix on <c>FejdStartup.Awake</c> walks every material of the
-    /// registered prefabs and, per material, calls <c>Resources.FindObjectsOfTypeAll&lt;Shader&gt;()</c> and compares
-    /// names against every loaded shader (OreMines 1.x: 2.25 s here).
-    /// Replacement: the same walk (same GameObjects, <c>GetComponentsInChildren&lt;Renderer&gt;(true)</c>, same null
-    /// checks, same order) and the same assignments (every shader whose name equals the material's shader name, in
-    /// <c>FindObjectsOfTypeAll</c> order, so the last one wins), with the shader list read once and grouped by name.
-    /// Only applied to a <c>ReplaceShaderPatch</c> whose IL fingerprint is one of <see cref="KnownSlow"/>; the later
-    /// variant of the helper that already builds a name dictionary (SeedBed) has another fingerprint and is left alone.
+    /// blacks7ar's ShaderReplacer helper (embedded in OreMines and others): its <c>ReplaceShaderPatch</c> postfix on
+    /// <c>FejdStartup.Awake</c> calls <c>Resources.FindObjectsOfTypeAll&lt;Shader&gt;()</c> per material of the registered
+    /// prefabs (OreMines 1.x: 2.25 s). Replacement: the same walk and assignments (every shader of the material's shader
+    /// name, in FindObjectsOfTypeAll order, last wins) with the shader list read once and grouped by name. Only for a
+    /// <c>ReplaceShaderPatch</c> whose IL fingerprint is in <see cref="KnownSlow"/>; the later dictionary variant (SeedBed)
+    /// has another fingerprint and is left alone.
     /// </summary>
     internal static class ShaderReplacerFix
     {
-        /// <summary>IL fingerprints (<see cref="IlShape"/>) of the per-material FindObjectsOfTypeAll variant, verified
-        /// by decompiling: OreMines 1.x (<c>OreMines.Functions.ShaderReplacer</c>).</summary>
-        private static readonly HashSet<string> KnownSlow = new HashSet<string>
-        {
-            "f1cf1862d4ff62924edea4d4",
-        };
+        /// <summary>IL fingerprints (<see cref="IlShape"/>) of the per-material variant, verified by decompiling: OreMines 1.x.</summary>
+        private static readonly HashSet<string> KnownSlow = new HashSet<string> { "f1cf1862d4ff62924edea4d4" };
 
         private static readonly Dictionary<MethodBase, FieldInfo> Targets = new Dictionary<MethodBase, FieldInfo>();
 
         public static void Install(Harmony harmony)
         {
-            MethodInfo awake = AccessTools.DeclaredMethod(typeof(FejdStartup), "Awake");
-            Patches info = Harmony.GetPatchInfo(awake);
-            if (info == null)
-            {
-                return;
-            }
+            Patches info = Harmony.GetPatchInfo(AccessTools.DeclaredMethod(typeof(FejdStartup), "Awake"));
+            if (info == null) return;
             foreach (Patch patch in info.Postfixes)
             {
                 MethodInfo method = patch.PatchMethod;
-                if (method.Name != "ReplaceShaderPatch" || Targets.ContainsKey(method))
-                {
-                    continue;
-                }
+                if (method.Name != "ReplaceShaderPatch" || Targets.ContainsKey(method)) continue;
                 string mod = method.DeclaringType?.Assembly.GetName().Name;
                 FieldInfo list = AccessTools.DeclaredField(method.DeclaringType, "GOToSwap");
                 if (!method.IsStatic || method.ReturnType != typeof(void) || method.GetParameters().Length != 0 ||
@@ -66,59 +53,23 @@ namespace Morgott.Preloader.ModHotspots
 
         private static bool Prefix(MethodBase __originalMethod)
         {
-            if (!Targets.TryGetValue(__originalMethod, out FieldInfo list))
-            {
-                return true;
-            }
-            Replace((List<GameObject>)list.GetValue(null));
-            return false;
-        }
-
-        private static void Replace(List<GameObject> gameObjects)
-        {
-            Dictionary<string, List<Shader>> byName = null;
-            foreach (GameObject gameObject in gameObjects)
+            if (!Targets.TryGetValue(__originalMethod, out FieldInfo list)) return true;
+            ILookup<string, Shader> byName = null;
+            foreach (GameObject gameObject in (List<GameObject>)list.GetValue(null))
             {
                 foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
                 {
-                    if (renderer == null)
-                    {
-                        continue;
-                    }
+                    if (renderer == null) continue;
                     foreach (Material material in renderer.sharedMaterials)
                     {
-                        if (material == null)
-                        {
-                            continue;
-                        }
-                        // Read once, on the first material, like the original's first call; nothing in this walk
-                        // creates or destroys shaders.
-                        byName = byName ?? GroupByName(Resources.FindObjectsOfTypeAll<Shader>());
-                        if (byName.TryGetValue(material.shader.name, out List<Shader> shaders))
-                        {
-                            foreach (Shader shader in shaders)
-                            {
-                                material.shader = shader;
-                            }
-                        }
+                        if (material == null) continue;
+                        // Read once, on the first material like the original's first call; this walk creates no shaders.
+                        byName = byName ?? Resources.FindObjectsOfTypeAll<Shader>().ToLookup(s => s.name, StringComparer.Ordinal);
+                        foreach (Shader shader in byName[material.shader.name]) material.shader = shader;
                     }
                 }
             }
-        }
-
-        private static Dictionary<string, List<Shader>> GroupByName(Shader[] shaders)
-        {
-            var byName = new Dictionary<string, List<Shader>>(StringComparer.Ordinal);
-            foreach (Shader shader in shaders)
-            {
-                string name = shader.name;
-                if (!byName.TryGetValue(name, out List<Shader> list))
-                {
-                    byName[name] = list = new List<Shader>();
-                }
-                list.Add(shader);
-            }
-            return byName;
+            return false;
         }
     }
 }
