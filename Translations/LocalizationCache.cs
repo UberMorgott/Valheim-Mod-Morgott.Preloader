@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.Translations
+namespace Morgott.Preloader.Translations
 {
     /// <summary>
     /// Vanilla <c>Localization.LoadCSV(TextAsset, language)</c> (assembly_guiutils Localization.cs:525-565) reads
@@ -23,7 +23,7 @@ namespace FastStartup.Translations
     internal static class LocalizationCache
     {
         private static readonly Dictionary<Key, KeyValuePair<string, string>[]> Rows = new Dictionary<Key, KeyValuePair<string, string>[]>();
-        private static readonly string[] OwnIds = { FastStartupPatcher.LocalizationHarmonyId, "morgott.faststartup.profiler" };
+        private static readonly string[] OwnIds = { PreloaderPatcher.LocalizationHarmonyId, "morgott.valheim.preloader.profiler" };
 
         private static MethodInfo _loadCsv;
         private static MethodInfo[] _skippedHelpers;

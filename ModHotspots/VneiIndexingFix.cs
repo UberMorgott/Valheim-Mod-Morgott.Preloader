@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Bootstrap;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.ModHotspots
+namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
     /// VNEI (MSchmoecker, <c>com.maxsch.valheim.vnei</c>): <c>Plugin.Update</c> runs <c>Indexing.IndexAll</c> in the
@@ -64,7 +64,7 @@ namespace FastStartup.ModHotspots
                 {
                     foreach (string owner in patches.Owners)
                     {
-                        if (!owner.StartsWith("morgott.faststartup.", StringComparison.Ordinal))
+                        if (!owner.StartsWith("morgott.valheim.preloader.", StringComparison.Ordinal))
                         {
                             mismatches.Add(entry.Key + " patched by " + owner);
                         }

@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
     /// [WorldGen]: faster world load / connect (<see cref="ParallelBiomeData"/>) and world creation

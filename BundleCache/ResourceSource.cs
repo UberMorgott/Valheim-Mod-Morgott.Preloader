@@ -4,7 +4,7 @@ using System.IO;
 using System.Reflection;
 using HarmonyLib;
 
-namespace FastStartup.BundleCache
+namespace Morgott.Preloader.BundleCache
 {
     /// <summary>
     /// A bundle embedded as a manifest resource in a loaded assembly. Identity = module MVID + resource name:

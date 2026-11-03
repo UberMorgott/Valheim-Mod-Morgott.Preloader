@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace FastStartup.BundleCache
+namespace Morgott.Preloader.BundleCache
 {
     /// <summary>
     /// LZMA (LZMA1) decoder, written from the public algorithm description in Igor Pavlov's LZMA SDK

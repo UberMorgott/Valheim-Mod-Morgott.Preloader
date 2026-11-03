@@ -3,15 +3,15 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.ModHotspots
+namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
     /// <c>[Diagnostics] DumpModHotspots</c>: at the main menu, writes the state the ModHotspots replacements produce to
-    /// BepInEx\FastStartup\modhotspots-state.txt, so a run with a toggle off can be diffed against a run with it on.
+    /// BepInEx\Morgott.Preloader\modhotspots-state.txt, so a run with a toggle off can be diffed against a run with it on.
     /// ShaderReplacer: every material of every registered GameObject (any helper variant) with its shader, identified
     /// by name and position among the loaded shaders of that name.
     /// </summary>
@@ -37,7 +37,7 @@ namespace FastStartup.ModHotspots
         {
             var sb = new StringBuilder();
             WriteShaderReplacers(sb);
-            string path = Path.Combine(Paths.BepInExRootPath, "FastStartup", "modhotspots-state.txt");
+            string path = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "modhotspots-state.txt");
             AtomicFile.WriteAllText(path, sb.ToString());
             Log.Info($"ModHotspots state written to {path}");
         }

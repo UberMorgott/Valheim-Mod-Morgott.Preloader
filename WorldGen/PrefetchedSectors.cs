@@ -1,11 +1,11 @@
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
     /// With <see cref="ParallelBiomeData"/>'s prefetch: the pure part of <c>AltBiomeWorldData.GenerateSectors</c>

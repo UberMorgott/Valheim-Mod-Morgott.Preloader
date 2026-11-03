@@ -8,7 +8,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 using VNEI;
@@ -17,7 +17,7 @@ using VNEI.Logic.Compatibility;
 using VNEI.Patches;
 using Object = UnityEngine.Object;
 
-namespace FastStartup.ModHotspots
+namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
     /// VNEI 0.17.6 <c>Plugin.Update</c> + <c>Indexing.IndexAll</c> reimplemented from the decompile (VNEI's code is the

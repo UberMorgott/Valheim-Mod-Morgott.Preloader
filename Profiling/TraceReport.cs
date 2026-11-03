@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>Chrome Trace JSON + plain-text top-N summary of a finished trace.</summary>
     internal static class TraceReport
@@ -106,7 +106,7 @@ namespace FastStartup.Profiling
             sb.AppendLine(header);
             sb.AppendLine(F("{0} {1:F0} ms since process start{2}; main-thread spans cover {3:F0} ms ({4:F0}%), " +
                             "rest = Unity/native work, frames and waits between hooked calls",
-                endLabel, endMs, StartupTrace.ProcessStartKnown ? "" : " (process start unknown: since FastStartup.Initialize)",
+                endLabel, endMs, StartupTrace.ProcessStartKnown ? "" : " (process start unknown: since Morgott.Preloader.Initialize)",
                 accountedMs, endMs > 0 ? accountedMs * 100 / endMs : 0));
             TraceEvent menu = events.FirstOrDefault(e => e.Cat == "game" && e.Name == "FejdStartup.Start");
             TraceEvent request = events.FirstOrDefault(e => e.Cat == "game" && e.Name == "FejdStartup.LoadMainScene");

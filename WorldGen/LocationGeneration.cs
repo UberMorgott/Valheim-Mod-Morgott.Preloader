@@ -4,13 +4,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
-using FastStartup.Core;
-using FastStartup.Profiling;
+using Morgott.Preloader.Core;
+using Morgott.Preloader.Profiling;
 using HarmonyLib;
 using SoftReferenceableAssets;
 using UnityEngine;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
     /// Location placement of a new world: <c>ZoneSystem.GenerateLocationsTimeSliced(ZoneLocation, Stopwatch, ZPackage)</c>

@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace FastStartup.BundleCache
+namespace Morgott.Preloader.BundleCache
 {
     /// <summary>
     /// Rewrites an LZMA UnityFS bundle as an uncompressed UnityFS bundle with managed code only (no Unity API, any

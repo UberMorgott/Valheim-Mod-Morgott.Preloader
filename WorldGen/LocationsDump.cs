@@ -6,12 +6,12 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
-    /// <c>[WorldGen] DumpLocations</c>: at LocationsGenerated writes <c>BepInEx\FastStartup\diag\locations-&lt;seed&gt;.txt</c>:
+    /// <c>[WorldGen] DumpLocations</c>: at LocationsGenerated writes <c>BepInEx\Morgott.Preloader\diag\locations-&lt;seed&gt;.txt</c>:
     /// the SHA-256 of the biome map (<c>PointBiomes</c> as int32, <c>PointHeights</c> as float bits, both in [x, y] order)
     /// and every <c>ZoneSystem.m_locationInstances</c> entry sorted by prefab name, then zone, with the position as raw
     /// float bits. Nothing in it depends on timing, so two runs of the same seed must give the same file byte for byte.
@@ -65,7 +65,7 @@ namespace FastStartup.WorldGen
             {
                 sb.Append(row.Line).Append('\n');
             }
-            string path = Path.Combine(Paths.BepInExRootPath, "FastStartup", "diag",
+            string path = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "diag",
                 "locations-" + generator.GetSeed().ToString(CultureInfo.InvariantCulture) + ".txt");
             AtomicFile.WriteAllText(path, sb.ToString());
             Log.Info($"WorldGen: {rows.Count} location instances dumped to {path}");

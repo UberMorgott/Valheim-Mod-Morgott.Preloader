@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text;
 
-namespace FastStartup.Core
+namespace Morgott.Preloader.Core
 {
     /// <summary>Write-to-temp then replace, so a crash mid-write never leaves a truncated file behind.</summary>
     internal static class AtomicFile

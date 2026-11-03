@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>One recorded event. Times are raw <see cref="Stopwatch.GetTimestamp"/> ticks.</summary>
     internal sealed class TraceEvent
@@ -69,13 +69,13 @@ namespace FastStartup.Profiling
             }
             catch (Exception)
             {
-                // Process start unknown: times are then relative to FastStartup.Initialize.
+                // Process start unknown: times are then relative to Morgott.Preloader.Initialize.
             }
             MainThreadId = Environment.CurrentManagedThreadId;
             Recording = true;
             if (ProcessStartKnown)
             {
-                Complete("lifecycle", "process start -> FastStartup.Initialize", ProcessStart, now,
+                Complete("lifecycle", "process start -> Morgott.Preloader.Initialize", ProcessStart, now,
                     "Unity boot, Doorstop, BepInEx preloader start, Cecil read of all Managed assemblies");
             }
             Mark("patcher.Initialize");

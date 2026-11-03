@@ -1,7 +1,7 @@
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
     /// <c>ZoneSystem.Update</c> (ValheimDecompiled-1.0.16 ZoneSystem.cs:1149-1159) sets

@@ -6,11 +6,11 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.BundleCache
+namespace Morgott.Preloader.BundleCache
 {
     /// <summary>
     /// Serves LZMA bundles that mods embed as manifest resources from an LZ4 copy on disk. The profile shows every
@@ -57,8 +57,8 @@ namespace FastStartup.BundleCache
         private static int _created;
         private static long _createdBytes;
 
-        /// <summary>BepInEx\FastStartup\cache\bundles (the per-Unity-version directory lives below it).</summary>
-        public static string CacheRoot => Path.GetFullPath(Path.Combine(Paths.BepInExRootPath, Path.Combine("FastStartup", Path.Combine("cache", "bundles"))));
+        /// <summary>BepInEx\Morgott.Preloader\cache\bundles (the per-Unity-version directory lives below it).</summary>
+        public static string CacheRoot => Path.GetFullPath(Path.Combine(Paths.BepInExRootPath, Path.Combine("Morgott.Preloader", Path.Combine("cache", "bundles"))));
 
         public static void Install(Harmony harmony)
         {
@@ -74,16 +74,16 @@ namespace FastStartup.BundleCache
                 Log.Warning("BundleCache: Mono resource stream internals not found (runtime changed?), cache disabled");
                 return;
             }
-            // Everything FastStartup writes stays under BepInEx\FastStartup in the game folder (owner rule: no caches
+            // Everything Morgott.Preloader writes stays under BepInEx\Morgott.Preloader in the game folder (owner rule: no caches
             // in AppData/LocalLow/%TEMP%), so deleting that folder removes it all.
-            string root = Path.GetFullPath(Path.Combine(Paths.BepInExRootPath, "FastStartup"));
+            string root = Path.GetFullPath(Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader"));
             _store = new CacheStore(CacheRoot, Application.unityVersion);
             if (EagerBuilder.Started && !EagerBuilder.Matches(_store.Dir))
             {
                 Log.Warning($"BundleCache: the eager build guessed another cache directory than Unity's {_store.Dir}; its copies are not used");
                 _eagerOff = true;
             }
-            // Modpack-shipped copies (read-only, same key and version folder): BepInEx\FastStartup\pack\bundles\v1-<Unity>.
+            // Modpack-shipped copies (read-only, same key and version folder): BepInEx\Morgott.Preloader\pack\bundles\v1-<Unity>.
             _pack = PackCache.Open(Path.Combine(root, Path.Combine("pack", Path.Combine("bundles", Path.GetFileName(_store.Dir)))), _store.Dir);
             Hook("LoadFromStreamInternal", nameof(StreamPrefix));
             Hook("LoadFromStreamAsyncInternal", nameof(StreamAsyncPrefix));

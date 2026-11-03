@@ -1,7 +1,7 @@
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.ModHotspots
+namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
     /// Faster equivalents of slow startup code in other mods, matched by the shape of the helper they embed (type and

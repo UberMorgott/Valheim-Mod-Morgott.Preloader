@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using UnityEngine.LowLevel;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Opt-in with <c>[Profiler] TimeSpawnWindow</c>: Unity-side frame timing of the world load. A marker system is inserted

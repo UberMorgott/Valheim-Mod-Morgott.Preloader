@@ -1,18 +1,18 @@
 # Copyright (c) 2026 Morgott. Licensed under CC BY-NC 4.0 (see LICENSE).
 #
-# Builds the modpack's prebuilt FastStartup bundle cache from a warm local cache.
+# Builds the modpack's prebuilt Morgott.Preloader bundle cache from a warm local cache.
 #
 #   pwsh -File tools\build-pack-cache.ps1 -PluginDirs Z:\modpacks\Valheim\universal\BepInEx\plugins,Z:\modpacks\Valheim\client\BepInEx\plugins -OutDir <dir>
 #
-# Input: the local cache FastStartup filled on this PC (<game>\BepInEx\FastStartup\cache\bundles\v1-<Unity>\<mvid>-<name hash>.bundle,
+# Input: the local cache Morgott.Preloader filled on this PC (<game>\BepInEx\Morgott.Preloader\cache\bundles\v1-<Unity>\<mvid>-<name hash>.bundle,
 # made after a normal launch reached the main menu and the background recompress finished) and the pack's plugin DLLs.
 # Output: <OutDir>\v1-<Unity>\ with one copy per bundle whose source DLL (by MVID) is in the pack, plus manifest.tsv. Copies of DLLs
-# not in the pack are left out (FastStartup would never use them). Same inputs = byte-identical output (sorted, no times or paths).
-# The pack ships <OutDir>'s content as client\BepInEx\FastStartup\pack\bundles\ (the launcher puts it in the game folder):
-#   <game>\BepInEx\FastStartup\pack\bundles\v1-6000.0.75f1\manifest.tsv + *.bundle
-# FastStartup only reads that folder; each copy is used only when its manifest row matches the loaded DLL's resource (README).
+# not in the pack are left out (Morgott.Preloader would never use them). Same inputs = byte-identical output (sorted, no times or paths).
+# The pack ships <OutDir>'s content as client\BepInEx\Morgott.Preloader\pack\bundles\ (the launcher puts it in the game folder):
+#   <game>\BepInEx\Morgott.Preloader\pack\bundles\v1-6000.0.75f1\manifest.tsv + *.bundle
+# Morgott.Preloader only reads that folder; each copy is used only when its manifest row matches the loaded DLL's resource (README).
 param(
-    [string]$CacheDir = 'D:\Steam\steamapps\common\Valheim\BepInEx\FastStartup\cache\bundles',
+    [string]$CacheDir = 'D:\Steam\steamapps\common\Valheim\BepInEx\Morgott.Preloader\cache\bundles',
     [Parameter(Mandatory)][string[]]$PluginDirs,
     [Parameter(Mandatory)][string]$OutDir
 )
@@ -27,9 +27,9 @@ using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text;
 
-public static class FastStartupPackCache
+public static class Morgott.PreloaderPackCache
 {
-    // Same key as FastStartup's ResourceSource.FileName: "<mvid N>-<fnv1a64(resource name UTF-16 chars) x16>.bundle".
+    // Same key as Morgott.Preloader's ResourceSource.FileName: "<mvid N>-<fnv1a64(resource name UTF-16 chars) x16>.bundle".
     public static string Key(Guid mvid, string resourceName)
     {
         ulong hash = 14695981039346656037UL;
@@ -112,7 +112,7 @@ $version = $versions[0]
 # Every embedded UnityFS resource of every pack DLL, by cache key.
 $sources = @{}
 foreach ($dll in $PluginDirs | ForEach-Object { Get-ChildItem -LiteralPath $_ -Recurse -File -Filter *.dll } | Sort-Object FullName) {
-    try { $bundles = [FastStartupPackCache]::Bundles($dll.FullName) }
+    try { $bundles = [Morgott.PreloaderPackCache]::Bundles($dll.FullName) }
     catch [BadImageFormatException] { continue }
     foreach ($kv in $bundles.GetEnumerator()) {
         $source = [pscustomobject]@{ Dll = $dll.Name; Name = $kv.Value.Key; Length = $kv.Value.Value.Length; Sha = Get-Sha256 $kv.Value.Value }
@@ -142,7 +142,7 @@ $bytes = 0L
 foreach ($copy in Get-ChildItem -LiteralPath $version.FullName -File -Filter *.bundle | Sort-Object Name) {
     $source = $sources[$copy.Name]
     if (-not $source) { $notInPack++; continue }
-    if (-not [FastStartupPackCache]::IsComplete($copy.FullName)) { throw "$($copy.FullName) is not a complete UnityFS file (recompress still running?)" }
+    if (-not [Morgott.PreloaderPackCache]::IsComplete($copy.FullName)) { throw "$($copy.FullName) is not a complete UnityFS file (recompress still running?)" }
     $staged = Copy-Item -LiteralPath $copy.FullName -Destination $target.FullName -PassThru   # the manifest describes the staged bytes
     $copySha = (Get-FileHash -LiteralPath $staged.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $rows.Add(($copy.Name, $source.Name, $source.Length, $source.Sha, $staged.Length, $copySha, $source.Dll) -join "`t")
@@ -150,7 +150,7 @@ foreach ($copy in Get-ChildItem -LiteralPath $version.FullName -File -Filter *.b
 }
 if ($rows.Count -eq 0) { throw "no cached copy in $($version.FullName) belongs to a DLL under $($PluginDirs -join ', ')" }
 $sorted = $rows.ToArray(); [Array]::Sort($sorted, [StringComparer]::Ordinal)   # rows start with the unique file name
-$header = "# FastStartup pack bundle cache $($version.Name): file`tresource`tsource bytes`tsource sha256`tcopy bytes`tcopy sha256`towner dll"
+$header = "# Morgott.Preloader pack bundle cache $($version.Name): file`tresource`tsource bytes`tsource sha256`tcopy bytes`tcopy sha256`towner dll"
 [IO.File]::WriteAllText((Join-Path $target.FullName 'manifest.tsv'), (@($header) + $sorted | ForEach-Object { "$_`n" }) -join '', [Text.UTF8Encoding]::new($false))
 
 # Publish: replace the previous build only once the new one is complete.

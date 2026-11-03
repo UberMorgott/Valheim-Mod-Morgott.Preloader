@@ -1,10 +1,10 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Optional Jotunn phases: prefab/item/piece/creature registration in the menu and on world load, their event

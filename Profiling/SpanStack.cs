@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Start timestamps of nested hooked calls on the current thread. Used instead of Harmony <c>__state</c>: on

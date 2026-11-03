@@ -4,7 +4,7 @@ using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>Methods whose code decides the world generator's output (biomes, heights, rivers): WorldGenerator, DUtils,
     /// FastNoise, BiomeHelpers (all methods and constructors) and the AltBiomeWorldData helpers the biome map build calls, and the Utils helpers they use (LerpStep, FloorToInt).

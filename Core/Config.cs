@@ -2,9 +2,9 @@ using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 
-namespace FastStartup.Core
+namespace Morgott.Preloader.Core
 {
-    /// <summary>BepInEx\config\FastStartup.cfg. A patcher has no BaseUnityPlugin.Config, so the file is opened directly.</summary>
+    /// <summary>BepInEx\config\Morgott.Preloader.cfg. A patcher has no BaseUnityPlugin.Config, so the file is opened directly.</summary>
     internal static class Config
     {
         public static ConfigEntry<bool> ProfilerEnabled { get; private set; }
@@ -66,21 +66,21 @@ namespace FastStartup.Core
 
         public static void Load()
         {
-            var file = new ConfigFile(Path.Combine(Paths.ConfigPath, "FastStartup.cfg"), true);
+            var file = new ConfigFile(Path.Combine(Paths.ConfigPath, "morgott.valheim.preloader.cfg"), true);
             ProfilerEnabled = file.Bind("Profiler", "Enabled", false,
-                "Record a startup trace (process start -> main menu) and write BepInEx\\FastStartup\\trace.json (Chrome trace) " +
+                "Record a startup trace (process start -> main menu) and write BepInEx\\Morgott.Preloader\\trace.json (Chrome trace) " +
                 "and summary.txt; recording goes on to the first spawn in a world (trace-world.json, summary-world.txt). Costs about 0.5 s of startup (its Harmony hooks), so it is off for normal play; turn it on to " +
                 "measure. Read once at launch.");
             ProfilerTimeModPatches = file.Bind("Profiler", "TimeModPatches", false,
                 "Also time every mod prefix/postfix/finalizer on the profiled game methods (FejdStartup.Awake etc.) per owner. " +
                 "Diagnostic only: hooking forces Mono to compile those methods early, which crashed the game once on a method " +
                 "Mono could not compile that way; such a method is skipped automatically from the next launch on " +
-                "(BepInEx\\FastStartup\\patch-probe.skip).");
+                "(BepInEx\\Morgott.Preloader\\patch-probe.skip).");
             BundleCacheEnabled = file.Bind("BundleCache", "Enabled", true,
                 "Serve LZMA asset bundles that mods embed in their DLLs from an LZ4 copy cached under " +
-                "BepInEx\\FastStartup\\cache\\bundles (game folder). Copies are made in the background after the main menu; " +
+                "BepInEx\\Morgott.Preloader\\cache\\bundles (game folder). Copies are made in the background after the main menu; " +
                 "the first launch loads the originals. Verified prebuilt copies shipped by the modpack in " +
-                "BepInEx\\FastStartup\\pack\\bundles are used first. Read once at launch.");
+                "BepInEx\\Morgott.Preloader\\pack\\bundles are used first. Read once at launch.");
             BundleCacheMaxSizeMB = file.Bind("BundleCache", "MaxCacheSizeMB", 2048,
                 new ConfigDescription("Local cache size cap. Least recently used copies beyond it are deleted after the main menu " +
                                       "(copies loaded in the current session are kept; the modpack's copies are never touched).",
@@ -102,7 +102,7 @@ namespace FastStartup.Core
                 "call instead of once per patch. Patch registration is unchanged. Read once at launch.");
             DumpHarmonyState = file.Bind("Diagnostics", "DumpHarmonyState", false,
                 "At the main menu write every Harmony-patched method with its prefix/postfix/transpiler/finalizer owners to " +
-                "BepInEx\\FastStartup\\harmony-state.txt (FastStartup's own patches excluded), for diffing two setups.");
+                "BepInEx\\Morgott.Preloader\\harmony-state.txt (Morgott.Preloader's own patches excluded), for diffing two setups.");
             ShaderReplacerFixEnabled = file.Bind("ModHotspots", "ShaderReplacer", true,
                 "Run the ShaderReplacer helper embedded in blacks7ar mods (OreMines) with one shader lookup instead of one " +
                 "per material. Same shader assignments in the same order; only the known slow version of the helper is " +
@@ -114,7 +114,7 @@ namespace FastStartup.Core
                 "exact code is replaced (matched by its IL). Read once at launch.");
             DumpModHotspots = file.Bind("Diagnostics", "DumpModHotspots", false,
                 "At the main menu write the state the ModHotspots replacements produce (e.g. every ShaderReplacer material " +
-                "and its shader) to BepInEx\\FastStartup\\modhotspots-state.txt, for diffing a toggle off against on.");
+                "and its shader) to BepInEx\\Morgott.Preloader\\modhotspots-state.txt, for diffing a toggle off against on.");
             ProfilerTimeSpawnWindow = file.Bind("Profiler", "TimeSpawnWindow", false,
                 "With [Profiler] Enabled: also time the per-frame world-load methods between the main scene request and the first " +
                 "player spawn (zone creation, object creation, terrain readiness, spawn point search, teleport) as count / total / " +
@@ -134,7 +134,7 @@ namespace FastStartup.Core
             DumpLocations = file.Bind("WorldGen", "DumpLocations", false,
                 "Diagnostic: when locations are generated (or a world with generated locations loads) write every location " +
                 "instance (prefab, zone, position as float bits) and the SHA-256 of the biome/height map to " +
-                "BepInEx\\FastStartup\\diag\\locations-<seed>.txt, for diffing WorldGen off against on. Also logs world-gen timings, " +
+                "BepInEx\\Morgott.Preloader\\diag\\locations-<seed>.txt, for diffing WorldGen off against on. Also logs world-gen timings, " +
                 "and compares FastLakes against the original lake merge (costs its 1-2 s once per world load).");
             FastLakes = file.Bind("WorldGen", "FastLakes", true,
                 "Merge the lake candidates of every world load and connect (WorldGenerator.MergePoints, 1-2 s on the main thread) " +
@@ -142,7 +142,7 @@ namespace FastStartup.Core
                 "and tie rule). Falls back to vanilla while another mod patches the lake search. Read once at launch.");
             PregenCache = file.Bind("WorldGen", "PregenCache", true,
                 "Keep the world generator's river and stream placement of each world (lakes, rivers, streams and the random state " +
-                "of their rasterisation, a few hundred KB) in BepInEx\\FastStartup\\cache\\worldgen and rebuild the river data from " +
+                "of their rasterisation, a few hundred KB) in BepInEx\\Morgott.Preloader\\cache\\worldgen and rebuild the river data from " +
                 "it on the next load / connect instead of searching again. Keyed by game build, Unity version and the generator's " +
                 "seed-derived inputs; off while another mod patches the world generator. Read once at launch.");
             PrefetchBiomeData = file.Bind("WorldGen", "PrefetchBiomeData", true,
@@ -157,7 +157,7 @@ namespace FastStartup.Core
                 "first load and on every join to a server) on all CPU cores, same per-pixel calls, identical textures. Falls back to " +
                 "vanilla while another mod patches the world generator or the minimap colour methods. Read once at launch.");
             ClientMinimapCache = file.Bind("WorldGen", "ClientMinimapCache", true,
-                "On a client joining a server: keep the generated minimap textures in BepInEx\\FastStartup\\cache\\minimap\\<seed>_g<gen>_<fp> " +
+                "On a client joining a server: keep the generated minimap textures in BepInEx\\Morgott.Preloader\\cache\\minimap\\<seed>_g<gen>_<fp> " +
                 "(vanilla file format; vanilla caches them only for worlds hosted locally) and load them on the next join instead of " +
                 "generating again. Keyed by world seed, world generator version, game / data versions and the minimap settings; " +
                 "the newest 8 worlds are kept; off while another mod patches the world generator. Read once at launch.");
@@ -169,7 +169,7 @@ namespace FastStartup.Core
                 "Record in-play frame times and, for every frame over SpikeThresholdMs, what ran in it: time per Unity player-loop " +
                 "subsystem, object creation / zone / location / dungeon room / terrain / asset bundle / texture upload calls, GC " +
                 "collections, release-player render and memory counters, first-seen shaders, player state. Writes " +
-                "BepInEx\\FastStartup\\spikes.tsv and spike-summary.txt (every 30 s in play and at quit). Independent of Enabled. " +
+                "BepInEx\\Morgott.Preloader\\spikes.tsv and spike-summary.txt (every 30 s in play and at quit). Independent of Enabled. " +
                 "Diagnostic only, off for normal play. Read once at launch.");
             SpikeThresholdMs = file.Bind("Profiler", "SpikeThresholdMs", 33f,
                 new ConfigDescription("SpikeProbe: frames at least this long (ms) are recorded as spikes. Read once at launch.",
@@ -178,7 +178,7 @@ namespace FastStartup.Core
                 "With SpikeProbe: time every mod patch method, plugin Update/FixedUpdate/LateUpdate/OnGUI/coroutine/Tick and the game's own " +
                 "per-frame messages (Update/FixedUpdate/LateUpdate/CustomUpdate/UpdateAI), per method and owner, and split the spike frames' " +
                 "script time by them. Installed at the main menu (a few seconds); adds a calibrated, reported cost to every wrapped call. Writes " +
-                "BepInEx\\FastStartup\\script-breakdown.txt and the spikes.tsv column scriptTop. Diagnostic only. Read once at launch.");
+                "BepInEx\\Morgott.Preloader\\script-breakdown.txt and the spikes.tsv column scriptTop. Diagnostic only. Read once at launch.");
         }
     }
 }

@@ -1,10 +1,10 @@
 using System;
 using System.IO;
 using BepInEx.Configuration;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Times every <c>ConfigFile.Save()</c> (BepInEx 5.4.23: rewrites the whole .cfg; <c>Bind</c> and every value

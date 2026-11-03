@@ -2,18 +2,18 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using BepInEx;
-using FastStartup.BundleCache;
-using FastStartup.ConfigSave;
-using FastStartup.Core;
-using FastStartup.HarmonyBatch;
-using FastStartup.ModHotspots;
-using FastStartup.Profiling;
-using FastStartup.Translations;
-using FastStartup.WorldGen;
+using Morgott.Preloader.BundleCache;
+using Morgott.Preloader.ConfigSave;
+using Morgott.Preloader.Core;
+using Morgott.Preloader.HarmonyBatch;
+using Morgott.Preloader.ModHotspots;
+using Morgott.Preloader.Profiling;
+using Morgott.Preloader.Translations;
+using Morgott.Preloader.WorldGen;
 using HarmonyLib;
 using Mono.Cecil;
 
-namespace FastStartup
+namespace Morgott.Preloader
 {
     /// <summary>
     /// BepInEx 5 preloader patcher entry point. Contract (BepInEx.Preloader AssemblyPatcher, decompiled
@@ -21,16 +21,16 @@ namespace FastStartup
     /// <c>Initialize()</c> (after all Managed DLLs are read, before patching) and <c>Finish()</c> (after patched
     /// assemblies are loaded, before the chainloader). No assembly is rewritten: all work is runtime hooks.
     /// </summary>
-    public static class FastStartupPatcher
+    public static class PreloaderPatcher
     {
-        // Every FastStartup Harmony ID starts with "morgott.faststartup." so its own patches are recognizable.
-        public const string LocalizationHarmonyId = "morgott.faststartup.localization";
-        private const string LifecycleHarmonyId = "morgott.faststartup.lifecycle";
-        private const string BundleCacheHarmonyId = "morgott.faststartup.bundlecache";
-        private const string ConfigSaveHarmonyId = "morgott.faststartup.configsave";
-        private const string HarmonyBatchHarmonyId = "morgott.faststartup.harmonybatch";
-        private const string ModHotspotsHarmonyId = "morgott.faststartup.modhotspots";
-        public const string WorldGenHarmonyId = "morgott.faststartup.worldgen";
+        // Every Morgott.Preloader Harmony ID starts with "morgott.valheim.preloader." so its own patches are recognizable.
+        public const string LocalizationHarmonyId = "morgott.valheim.preloader.localization";
+        private const string LifecycleHarmonyId = "morgott.valheim.preloader.lifecycle";
+        private const string BundleCacheHarmonyId = "morgott.valheim.preloader.bundlecache";
+        private const string ConfigSaveHarmonyId = "morgott.valheim.preloader.configsave";
+        private const string HarmonyBatchHarmonyId = "morgott.valheim.preloader.harmonybatch";
+        private const string ModHotspotsHarmonyId = "morgott.valheim.preloader.modhotspots";
+        public const string WorldGenHarmonyId = "morgott.valheim.preloader.worldgen";
 
         public static IEnumerable<string> TargetDLLs { get; } = new string[0];
 

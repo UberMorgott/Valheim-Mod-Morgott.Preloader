@@ -3,21 +3,21 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Wires the profiling modules. Phases: <see cref="Begin"/> from the patcher's Initialize (no Unity types
     /// touched), <see cref="InstallRuntimeHooks"/> from Finish (pure managed hooks only: Harmony + Chainloader),
     /// Unity/game hooks from the Chainloader.Initialize postfix once the engine is up. Output on main-menu ready:
-    /// BepInEx\FastStartup\trace.json + summary.txt; on the first player spawn: trace-world.json + summary-world.txt.
+    /// BepInEx\Morgott.Preloader\trace.json + summary.txt; on the first player spawn: trace-world.json + summary-world.txt.
     /// </summary>
     internal static class Profiler
     {
-        public const string HarmonyId = "morgott.faststartup.profiler";
+        public const string HarmonyId = "morgott.valheim.preloader.profiler";
 
         private static Harmony _harmony;
         private static long _initialized;
@@ -25,7 +25,7 @@ namespace FastStartup.Profiling
         private static int _worldExported;
         private static volatile bool _menuReached;
 
-        private static string OutputDir => Path.Combine(Paths.BepInExRootPath, "FastStartup");
+        private static string OutputDir => Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader");
 
         public static void Begin()
         {
@@ -113,7 +113,7 @@ namespace FastStartup.Profiling
             }
             Log.Guard("Trace export", () =>
             {
-                string header = $"FastStartup startup profile - {DateTime.Now:yyyy-MM-dd HH:mm:ss} - {reason} - {events.Count} events";
+                string header = $"Morgott.Preloader startup profile - {DateTime.Now:yyyy-MM-dd HH:mm:ss} - {reason} - {events.Count} events";
                 AtomicFile.WriteAllText(Path.Combine(OutputDir, "trace" + suffix + ".json"), TraceReport.ChromeTrace(events));
                 AtomicFile.WriteAllText(Path.Combine(OutputDir, "summary" + suffix + ".txt"), TraceReport.Summary(events, endMs, endLabel, header));
                 Log.Info($"Profile written to {OutputDir} (trace{suffix}.json for chrome://tracing / ui.perfetto.dev, summary{suffix}.txt)");

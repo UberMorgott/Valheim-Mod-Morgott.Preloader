@@ -8,7 +8,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using Unity.Profiling;
 using Unity.Jobs.LowLevel.Unsafe;
@@ -16,7 +16,7 @@ using Unity.Profiling.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.LowLevel;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Opt-in with <c>[Profiler] SpikeProbe</c>: in-play frame-time spikes and what was going on in the spike frame, with
@@ -43,14 +43,14 @@ namespace FastStartup.Profiling
     /// <item>Player context on spike frames only: segment (set by a test driver through <see cref="Segment"/>), speed,
     /// teleporting, interior, zone changed within 1 s, non-tamed creatures within 30 m, combat timer.</item>
     /// </list>
-    /// Output: BepInEx\FastStartup\spikes.tsv (one row per spike frame) and spike-summary.txt (frame-time stats per
+    /// Output: BepInEx\Morgott.Preloader\spikes.tsv (one row per spike frame) and spike-summary.txt (frame-time stats per
     /// segment, causes ranked by total ms, top spike frames, counter availability, probe overhead), written every 30 s
     /// in play (worker thread) and at quit / <see cref="Flush"/>; profiler-available.txt once (every metric
     /// ProfilerRecorderHandle.GetAvailable lists in this player).
     /// </summary>
     public static class SpikeProbe
     {
-        public const string HarmonyId = "morgott.faststartup.spikeprobe";
+        public const string HarmonyId = "morgott.valheim.preloader.spikeprobe";
 
         /// <summary>Free-form label of the current test segment ("walk", "portal", ...); a driver sets it by reflection.</summary>
         public static string Segment = "play";
@@ -71,7 +71,7 @@ namespace FastStartup.Profiling
             { "forceGenerateAll", "vanilla Heightmap.ForceGenerateAll (SnapToGround.SnappAll); Skidbladnir Perf.Dungeons" },
             { "bundleLoad", "AssetBundle sync load (vanilla SoftReferenceableAssets / mods)" },
             { "textureApply", "Texture2D.Apply (minimap fog / Jotunn overlays); Skidbladnir Perf.Fog / MapOverlay" },
-            { "render+newVariants", "render with first-seen shader variants: shader compile candidate (Skidbladnir PrefabWarm / FastStartup SVC)" },
+            { "render+newVariants", "render with first-seen shader variants: shader compile candidate (Skidbladnir PrefabWarm / Morgott.Preloader SVC)" },
             { "render", "render, no first-seen material (GPU / driver / uploads)" },
             { "scripts", "MonoBehaviour Update/LateUpdate/FixedUpdate not in a hook (vanilla + mods; per-method: Skidbladnir StressProf)" },
             { "scripts+gc", "scripts with a GC collection in the frame (Mono GC; Skidbladnir Perf.Memory)" },
@@ -202,7 +202,7 @@ namespace FastStartup.Profiling
         private static int _flushedSpikes = -1;
         private static int _writing;
 
-        private static string Dir => Path.Combine(Paths.BepInExRootPath, "FastStartup");
+        private static string Dir => Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader");
 
         /// <summary>Chainloader.Initialize postfix (engine up, no plugin Awake yet): hooks now, player loop at the main menu.</summary>
         internal static void Install(Harmony harmony)
@@ -971,7 +971,7 @@ namespace FastStartup.Profiling
             bool[] markerValid, bool[] markerSeen, string probe, string firstSeen)
         {
             var sb = new StringBuilder();
-            sb.Append("FastStartup spike probe - ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append(" - threshold ")
+            sb.Append("Morgott.Preloader spike probe - ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append(" - threshold ")
                 .Append(F(_thresholdMs)).Append(" ms - logical cores Environment=").Append(Environment.ProcessorCount).Append(" SystemInfo=")
                 .Append(SystemInfo.processorCount).Append(" JobWorkerCount=").Append(JobsUtility.JobWorkerCount).Append('/').Append(JobsUtility.JobWorkerMaximumCount).Append('\n').Append(probe).Append('\n').Append(firstSeen).Append("\n\n");
             sb.Append("== frame time per segment (play frames, p = upper bound of a 0.5 ms bucket)\n");

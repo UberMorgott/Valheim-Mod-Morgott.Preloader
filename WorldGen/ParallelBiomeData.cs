@@ -5,11 +5,11 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
     /// <c>AltBiomeWorldData.GenerateBiomePoints</c> (ValheimDecompiled-1.0.16 AltBiomeWorldData.cs:99-130) fills a 2048x2048

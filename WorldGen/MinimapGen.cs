@@ -9,11 +9,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
     /// The world minimap (forest mask, biome colours, heights; ValheimDecompiled-1.0.20 Minimap.cs) is built in one
@@ -28,7 +28,7 @@ namespace FastStartup.WorldGen
     /// <para><b>ClientMinimapCache</b>: vanilla sets the cache paths only in <c>Minimap.Start</c> when <c>ZNet.World</c>
     /// exists (:569-581, host / single player); a remote client's world is created later in <c>ZNet.RPC_PeerInfo</c>
     /// (ZNet.cs:1109-1116) and its <c>m_worldVersion</c> stays default, so every join regenerates and the save no-ops
-    /// (:1991). On a client the paths point to <c>BepInEx\FastStartup\cache\minimap\&lt;seed&gt;_g&lt;gen&gt;_&lt;fp&gt;\</c>
+    /// (:1991). On a client the paths point to <c>BepInEx\Morgott.Preloader\cache\minimap\&lt;seed&gt;_g&lt;gen&gt;_&lt;fp&gt;\</c>
     /// (vanilla file names and format; the vanilla save in GenerateWorldMap writes there) and the vanilla load body runs
     /// without the host-save version check, which has no meaning for a world received from a server. The map is a pure
     /// function of the seed and world generator version; the fingerprint adds game / data versions, texture size, pixel
@@ -99,7 +99,7 @@ namespace FastStartup.WorldGen
             _metaPath = AccessTools.FieldRefAccess<Minimap, string>("m_cachedMinimapMetaPath");
             _forestColor = (Color)forest.GetValue(null);
             _noForestColor = (Color)noForest.GetValue(null);
-            _root = Path.Combine(Paths.BepInExRootPath, "FastStartup", "cache", "minimap");
+            _root = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "cache", "minimap");
 
             // Code deciding the map besides the generator: the colour methods and Utils.SmoothStep (Mistlands mask).
             _guarded = new List<MethodBase>(GeneratorPath.Methods) { pixel, mask };

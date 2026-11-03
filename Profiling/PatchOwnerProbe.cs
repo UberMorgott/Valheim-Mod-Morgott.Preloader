@@ -5,11 +5,11 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using MonoMod.Utils;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Opt-in (<c>[Profiler] TimeModPatches</c>): splits the "mods' patches" part of the hooked game methods by
@@ -41,7 +41,7 @@ namespace FastStartup.Profiling
 
         [ThreadStatic] private static SpanStack _spans;
 
-        private static string Dir => Path.Combine(Paths.BepInExRootPath, "FastStartup");
+        private static string Dir => Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader");
 
         public static void Install(Harmony harmony)
         {
@@ -109,10 +109,10 @@ namespace FastStartup.Profiling
                 }
                 foreach (Patch patch in info.Prefixes.Concat(info.Postfixes).Concat(info.Finalizers))
                 {
-                    // FastStartup's own patches stay unwrapped, except WorldGen: its prefixes replace vanilla bodies
+                    // Morgott.Preloader's own patches stay unwrapped, except WorldGen: its prefixes replace vanilla bodies
                     // (parallel GenerateBiomePoints), so without a name their time read as "untimed mod patches".
-                    bool own = patch.owner.StartsWith("morgott.faststartup", StringComparison.Ordinal) &&
-                               patch.owner != FastStartupPatcher.WorldGenHarmonyId;
+                    bool own = patch.owner.StartsWith(PatchGuard.OwnPrefix, StringComparison.Ordinal) &&
+                               patch.owner != PreloaderPatcher.WorldGenHarmonyId;
                     if (!own &&
                         Wrap(harmony, patch.PatchMethod, patch.owner, target.DeclaringType?.Name + "." + target.Name, pendingPath, skip))
                     {

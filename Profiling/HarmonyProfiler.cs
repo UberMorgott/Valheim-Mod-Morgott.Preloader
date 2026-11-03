@@ -1,9 +1,9 @@
 using System;
 using System.Reflection;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Times HarmonyX patching per owner (Harmony ID). Hooks (0Harmony 2.9.0 in BepInEx\core):

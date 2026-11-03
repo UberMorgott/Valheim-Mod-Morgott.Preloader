@@ -2,13 +2,13 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 
-namespace FastStartup.Core
+namespace Morgott.Preloader.Core
 {
-    /// <summary>Foreign (non-FastStartup) Harmony patches on game methods a module replaces or reorders: such a module
+    /// <summary>Foreign (non-Morgott.Preloader) Harmony patches on game methods a module replaces or reorders: such a module
     /// falls back to vanilla instead of skipping or reordering another mod's code.</summary>
     internal static class PatchGuard
     {
-        public const string OwnPrefix = "morgott.faststartup.";
+        public const string OwnPrefix = "morgott.valheim.preloader.";
 
         /// <summary>"Type.Method by owner" of the first foreign patch on <paramref name="method"/>, null if none.
         /// <paramref name="bodyOnly"/> = only transpilers / IL manipulators count (prefixes and postfixes still run).</summary>

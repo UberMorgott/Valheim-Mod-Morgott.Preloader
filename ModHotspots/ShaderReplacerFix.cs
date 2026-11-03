@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.ModHotspots
+namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
     /// blacks7ar's ShaderReplacer helper (Harmony ID <c>blacks7ar.utilities.ShaderReplacer</c>, embedded in OreMines

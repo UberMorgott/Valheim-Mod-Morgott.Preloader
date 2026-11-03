@@ -9,12 +9,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
     /// <c>WorldGenerator.Pregenerate</c> (ValheimDecompiled-1.0.16 WorldGenerator.cs:252-258) runs on every world load and
@@ -25,7 +25,7 @@ namespace FastStartup.WorldGen
     /// Cache: after a vanilla Pregenerate the lakes, the three river lists, the <c>Random.state</c> at the start of each of
     /// the three RenderRivers calls and the final one-grid river cache (<c>m_cachedRiverGrid</c> + a copy of
     /// <c>m_cachedRiverPoints</c>, which can hold a pre-stream array) are written to
-    /// <c>BepInEx\FastStartup\cache\worldgen\pregen-&lt;key&gt;.bin</c>. On a hit, Pregenerate is replaced by: the lists
+    /// <c>BepInEx\Morgott.Preloader\cache\worldgen\pregen-&lt;key&gt;.bin</c>. On a hit, Pregenerate is replaced by: the lists
     /// assigned, the original RenderRivers called three times with the recorded states and the same lists / rules (so
     /// <c>m_riverPoints</c> is built by vanilla code, keys in the same insertion order, same widths), the river cache set,
     /// and <c>Random.state</c> left as it was at entry (vanilla restores it around every placement, FindLakes draws none).
@@ -91,7 +91,7 @@ namespace FastStartup.WorldGen
             _keyFields = typeof(WorldGenerator).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .Where(f => f.FieldType == typeof(int) || f.FieldType == typeof(float) || f.FieldType == typeof(bool) || f.FieldType == typeof(long))
                 .OrderBy(f => f.Name, StringComparer.Ordinal).ToArray();
-            _dir = System.IO.Path.Combine(Paths.BepInExRootPath, "FastStartup", "cache", "worldgen");
+            _dir = System.IO.Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "cache", "worldgen");
             _envKey = "format " + Format + "|unity " + Application.unityVersion + "|valheim " + typeof(WorldGenerator).Module.ModuleVersionId.ToString("N");
             harmony.Patch(_pregenerate,
                 prefix: new HarmonyMethod(AccessTools.Method(typeof(PregenCache), nameof(PregeneratePrefix)), Priority.Last),

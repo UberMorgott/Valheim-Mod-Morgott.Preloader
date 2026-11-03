@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using HarmonyLib.Public.Patching;
 using MonoMod.RuntimeDetour;
 
-namespace FastStartup.HarmonyBatch
+namespace Morgott.Preloader.HarmonyBatch
 {
     /// <summary>
     /// HarmonyX 2.9 (BepInEx\core\0Harmony.dll) registers a patch in the method's <c>PatchInfo</c> and then rebuilds the

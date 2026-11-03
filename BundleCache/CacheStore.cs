@@ -5,9 +5,9 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 
-namespace FastStartup.BundleCache
+namespace Morgott.Preloader.BundleCache
 {
     /// <summary>
     /// On-disk cache layout: <c>&lt;root&gt;\v1-&lt;Unity version&gt;\&lt;mvid&gt;-&lt;name hash&gt;.bundle</c>. The file
@@ -247,7 +247,7 @@ namespace FastStartup.BundleCache
         private void SaveIndex()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("# FastStartup bundle cache: file<TAB>last used (UTC ticks)<TAB>source. Only used for LRU eviction.");
+            sb.AppendLine("# Morgott.Preloader bundle cache: file<TAB>last used (UTC ticks)<TAB>source. Only used for LRU eviction.");
             foreach (KeyValuePair<string, IndexEntry> kv in _index.OrderBy(kv => kv.Key, StringComparer.Ordinal))
             {
                 sb.Append(kv.Key).Append('\t').Append(kv.Value.LastUsedUtc.ToString(CultureInfo.InvariantCulture))

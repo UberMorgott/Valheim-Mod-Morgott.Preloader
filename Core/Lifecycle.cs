@@ -4,7 +4,7 @@ using System.Globalization;
 using BepInEx.Bootstrap;
 using HarmonyLib;
 
-namespace FastStartup.Core
+namespace Morgott.Preloader.Core
 {
     /// <summary>
     /// Startup milestones for modules that do not depend on the profiler. <see cref="ChainloaderInitialized"/> =

@@ -5,10 +5,10 @@ using System.IO;
 using System.Reflection;
 using BepInEx.Bootstrap;
 using BepInEx.Configuration;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.ConfigSave
+namespace Morgott.Preloader.ConfigSave
 {
     /// <summary>
     /// BepInEx 5.4.23 <c>ConfigFile.Bind</c> and every value change call <c>Save()</c> while <c>SaveOnConfigSet</c> is

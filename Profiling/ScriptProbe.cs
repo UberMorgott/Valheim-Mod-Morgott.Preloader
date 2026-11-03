@@ -11,11 +11,11 @@ using System.Text;
 using System.Threading;
 using BepInEx;
 using BepInEx.Bootstrap;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// Opt-in with <c>[Profiler] ScriptBreakdown</c> (needs SpikeProbe): splits SpikeProbe's "script residual" (Update /
@@ -37,12 +37,12 @@ namespace FastStartup.Profiling
     /// Installed once at the main menu (after SpikeProbe's player loop), main thread only. Safety as
     /// <see cref="PatchOwnerProbe"/>: MonoMod's reflection cache emptied around each wrap; the method being wrapped is
     /// written to script-probe.pending first and a launch that died there skips it from then on (script-probe.skip).
-    /// Overhead: calibrated per wrapped call at install and reported per frame. Output BepInEx\FastStartup\script-breakdown.txt,
+    /// Overhead: calibrated per wrapped call at install and reported per frame. Output BepInEx\Morgott.Preloader\script-breakdown.txt,
     /// written with SpikeProbe's files; spike rows get the top methods of the frame (spikes.tsv column scriptTop).
     /// </summary>
     internal static class ScriptProbe
     {
-        public const string HarmonyId = "morgott.faststartup.scriptprobe";
+        public const string HarmonyId = "morgott.valheim.preloader.scriptprobe";
 
         private sealed class Rec
         {
@@ -65,7 +65,7 @@ namespace FastStartup.Profiling
         // Assemblies skipped the way StressProf skips them (native crashes while detouring in the lab; their time stays
         // in the wrapped game callers).
         private static readonly HashSet<string> SkipAsm = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            { "Warfare", "Wizardry", "Armory", "FastStartup", "0Harmony", "BepInEx", "BepInEx.Preloader", "MonoMod.Utils", "MonoMod.RuntimeDetour" };
+            { "Warfare", "Wizardry", "Armory", "Morgott.Preloader", "0Harmony", "BepInEx", "BepInEx.Preloader", "MonoMod.Utils", "MonoMod.RuntimeDetour" };
 
         private static readonly HashSet<string> PluginMsgs = new HashSet<string> { "Update", "FixedUpdate", "LateUpdate", "OnGUI" };
         private static readonly HashSet<string> VanillaMsgs = new HashSet<string>
@@ -96,7 +96,7 @@ namespace FastStartup.Profiling
         private static long _violations;
         private static long _loggedViolations = -1;
 
-        private static string Dir => Path.Combine(Paths.BepInExRootPath, "FastStartup");
+        private static string Dir => Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader");
 
         internal static bool On => _on;
 
@@ -206,7 +206,7 @@ namespace FastStartup.Profiling
                 }
                 foreach (Patch p in info.Prefixes.Concat(info.Postfixes).Concat(info.Finalizers))
                 {
-                    if (p.PatchMethod == null || p.owner.StartsWith("morgott.faststartup", StringComparison.Ordinal))
+                    if (p.PatchMethod == null || p.owner.StartsWith(PatchGuard.OwnPrefix, StringComparison.Ordinal))
                     {
                         continue;
                     }
@@ -553,7 +553,7 @@ namespace FastStartup.Profiling
             double nsPerCall = _costTicksPerCall * MsPerTick * 1e6;
             double coveredMs = rows.Sum(r => r.SpikeSelf) * MsPerTick;
             var sb = new StringBuilder();
-            sb.Append("FastStartup script breakdown - ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append('\n');
+            sb.Append("Morgott.Preloader script breakdown - ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append('\n');
             sb.Append(string.Format(CultureInfo.InvariantCulture,
                 "wrapped {0} mod patch methods, {1} plugin messages/coroutines/ticks, {2} vanilla messages; failed {3}, skipped {4}; install {5:F1} s at the main menu\n",
                 _wrappedPatches, _wrappedPlugin, _wrappedVanilla, _failed, _skipped, _installSec));

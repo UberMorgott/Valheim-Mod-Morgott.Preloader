@@ -7,7 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HarmonyLib;
 
-namespace FastStartup.ModHotspots
+namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
     /// Identifies a helper that mods embed by the exact IL of its methods, so a replacement is only applied to code

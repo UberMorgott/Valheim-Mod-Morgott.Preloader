@@ -1,14 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- LangVersion, determinism, PathMap, embedded PDB, SourceLink off, ValheimDir/ManagedDir/BepInExCoreDir/PluginsDir
-       and the game's BepInEx + 0Harmony + Jotunn references come from build\Valheim.Build.props. -->
+       and the game's BepInEx + 0Harmony references come from build\Valheim.Build.props. -->
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <ValheimPlugin>true</ValheimPlugin>
-    <ValheimUseJotunn>true</ValheimUseJotunn>
-    <AssemblyName>FastStartup</AssemblyName>
-    <RootNamespace>FastStartup</RootNamespace>
-    <Product>FastStartup</Product>
+    <AssemblyName>Morgott.Preloader</AssemblyName>
+    <RootNamespace>Morgott.Preloader</RootNamespace>
+    <Product>Morgott.Preloader</Product>
     <Version>0.9.3</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -62,7 +61,7 @@
       <Private>false</Private>
     </Reference>
     <!-- Third-party plugins for ModHotspots replacements: only touched after the plugin is found loaded and its IL
-         fingerprint matched (ModHotspots\VneiIndexingFix.cs). Jotunn comes from ValheimUseJotunn. -->
+         fingerprint matched (ModHotspots\VneiIndexingFix.cs). -->
     <Reference Include="VNEI">
       <HintPath>$(PluginsDir)\Vnei\VNEI.dll</HintPath>
       <Private>false</Private>

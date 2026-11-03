@@ -4,11 +4,11 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.Serialization;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.WorldGen
+namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
     /// <c>WorldGenerator.FindLakes</c> (ValheimDecompiled-1.0.16 WorldGenerator.cs:275-291) runs on every world load and

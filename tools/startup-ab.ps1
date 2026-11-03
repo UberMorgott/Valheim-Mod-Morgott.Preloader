@@ -8,7 +8,7 @@
 #
 # Pack  = pack copies installed, local cache parked; run #1 is the first launch after a pack update (copies and sources
 #         hashed), later runs are stamped (-Unstamped: every run hashes). Local = no pack, the current local cache. None = no pack, empty
-#         local cache before each run (the cold 38 s case). Parked folders stay inside BepInEx\FastStartup and are moved back in
+#         local cache before each run (the cold 38 s case). Parked folders stay inside BepInEx\Morgott.Preloader and are moved back in
 #         finally. Starts only its own valheim.exe, refuses when one from the game folder already runs, closes it at the
 #         menu. Holds the machine-wide game slot for the whole run (busy -> exit 2; -SlotWaitSec N waits first).
 #         Needs a quiet machine for meaningful numbers.
@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
 if (-not (Test-Path -LiteralPath $GameSlotLib)) { throw "game slot library not found: $GameSlotLib (pass -GameSlotLib)" }
 . $GameSlotLib
 if ($Setup -eq 'Pack' -and -not (Test-Path -LiteralPath (Join-Path $PackDir 'v1-*\manifest.tsv'))) { throw '-Setup Pack needs -PackDir with v1-<Unity>\manifest.tsv' }
-$fs = "$Game\BepInEx\FastStartup"
+$fs = "$Game\BepInEx\Morgott.Preloader"
 $log = "$Game\BepInEx\LogOutput.log"
 $local = "$fs\cache\bundles"
 $pack = "$fs\pack\bundles"

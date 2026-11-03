@@ -8,19 +8,19 @@ using System.Security.Cryptography;
 using System.Text;
 using BepInEx;
 using BepInEx.Configuration;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 using VNEI;
 using VNEI.Logic;
 using VNEI.Patches;
 
-namespace FastStartup.ModHotspots
+namespace Morgott.Preloader.ModHotspots
 {
     /// <summary>
     /// <c>[Diagnostics] DumpModHotspots</c> with VNEI loaded: on leaving the world (<c>Game.Logout</c> or
     /// <c>Game.OnApplicationQuit</c>), the first time an index exists, writes VNEI's whole index to
-    /// BepInEx\FastStartup\modhotspots-vnei.txt in its own order: every item (names, texts, type, flags, mod, prefab,
+    /// BepInEx\Morgott.Preloader\modhotspots-vnei.txt in its own order: every item (names, texts, type, flags, mod, prefab,
     /// icon sprite + texture + pixel hash when readable, the recipes it is result / ingredient of), both name lookups,
     /// every recipe (stations, ingredient and result groups with amounts, width, flags) and the subscriber counts of
     /// the events <c>Plugin.Update</c> and <c>Item</c> subscribe to. VNEIIndexing off vs on must give the same file.
@@ -100,7 +100,7 @@ namespace FastStartup.ModHotspots
               .Append(" showOnlyKnown.SettingChanged=").Append(SettingChanged(typeof(Plugin), "showOnlyKnown"))
               .Append(" forceShowOnlyKnown.SettingChanged=").Append(SettingChanged(typeof(Plugin), "forceShowOnlyKnown"))
               .Append(" modNames=").Append(Static<System.Collections.ICollection>(typeof(ModNames), "SourceMod").Count).Append('\n');
-            string path = Path.Combine(Paths.BepInExRootPath, "FastStartup", "modhotspots-vnei.txt");
+            string path = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "modhotspots-vnei.txt");
             AtomicFile.WriteAllText(path, sb.ToString());
             _written = true;
             Log.Info($"ModHotspots: VNEI index ({items.Count} items, {recipes.Count} recipes) written to {path}");

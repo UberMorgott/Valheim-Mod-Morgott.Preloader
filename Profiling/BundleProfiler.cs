@@ -1,11 +1,11 @@
 using System;
 using System.IO;
 using System.Reflection;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// AssetBundle load timing. Every public <c>AssetBundle.LoadFrom*</c> overload funnels into one of six internal

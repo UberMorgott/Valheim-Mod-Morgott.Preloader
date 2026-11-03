@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Bootstrap;
 using BepInEx.Logging;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using HarmonyLib;
 
-namespace FastStartup.Profiling
+namespace Morgott.Preloader.Profiling
 {
     /// <summary>
     /// BepInEx chainloader lifecycle + per-plugin load cost. <c>Chainloader.Start</c> logs

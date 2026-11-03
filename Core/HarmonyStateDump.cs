@@ -7,18 +7,18 @@ using System.Text.RegularExpressions;
 using BepInEx;
 using HarmonyLib;
 
-namespace FastStartup.Core
+namespace Morgott.Preloader.Core
 {
     /// <summary>
     /// <c>[Diagnostics] DumpHarmonyState</c>: at the main menu, writes every patched method (sorted) with its patches
-    /// per kind in Harmony's own order (owner, priority, patch method) to BepInEx\FastStartup\harmony-state.txt, so two
-    /// setups can be diffed. FastStartup's own patches (owner <c>morgott.faststartup.*</c>) are left out; a method
-    /// patched only by FastStartup is left out entirely. Patch indices are left out: they count FastStartup's own
+    /// per kind in Harmony's own order (owner, priority, patch method) to BepInEx\Morgott.Preloader\harmony-state.txt, so two
+    /// setups can be diffed. Morgott.Preloader's own patches (owner <c>morgott.valheim.preloader.*</c>) are left out; a method
+    /// patched only by Morgott.Preloader is left out entirely. Patch indices are left out: they count Morgott.Preloader's own
     /// patches too.
     /// </summary>
     internal static class HarmonyStateDump
     {
-        private const string OwnPrefix = "morgott.faststartup.";
+        private const string OwnPrefix = "morgott.valheim.preloader.";
         private static readonly Regex AutoId = new Regex("harmony-auto-[0-9a-f-]+");
 
         public static void Install() => Lifecycle.MenuReady += () => Log.Guard("Harmony state dump", Write);
@@ -44,7 +44,7 @@ namespace FastStartup.Core
                 }
             }
             lines.Sort(System.StringComparer.Ordinal);
-            string path = Path.Combine(Paths.BepInExRootPath, "FastStartup", "harmony-state.txt");
+            string path = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "harmony-state.txt");
             AtomicFile.WriteAllText(path, string.Join("", lines.ToArray()));
             Log.Info($"Harmony state: {lines.Count} patched methods written to {path}");
         }

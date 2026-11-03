@@ -6,13 +6,13 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 
-namespace FastStartup.BundleCache
+namespace Morgott.Preloader.BundleCache
 {
     /// <summary>
     /// Prebuilt LZ4 copies shipped in the modpack: <c>&lt;root&gt;\v1-&lt;Unity version&gt;\&lt;key&gt;.bundle</c> +
-    /// <c>manifest.tsv</c> (written by <c>tools\build-pack-cache.ps1</c>). Read-only: FastStartup never writes or
+    /// <c>manifest.tsv</c> (written by <c>tools\build-pack-cache.ps1</c>). Read-only: Morgott.Preloader never writes or
     /// deletes here, so the launcher (which restores every pack file) and the cache never fight.
     /// A copy is served only when, for its key (module MVID + resource-name hash): the manifest row names the same
     /// resource; the copy is a complete LZ4 UnityFS file whose directory (node paths + sizes) equals the source

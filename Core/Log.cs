@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
 
-namespace FastStartup.Core
+namespace Morgott.Preloader.Core
 {
     /// <summary>Single BepInEx log source for the patcher; every hook error goes through <see cref="Guard"/>.</summary>
     internal static class Log
     {
-        private static readonly ManualLogSource Source = Logger.CreateLogSource("FastStartup");
+        private static readonly ManualLogSource Source = Logger.CreateLogSource("Morgott.Preloader");
         private static readonly HashSet<string> Logged = new HashSet<string>();
 
         public static void Info(string message) => Source.LogInfo(message);

@@ -6,10 +6,10 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using BepInEx;
-using FastStartup.Core;
+using Morgott.Preloader.Core;
 using Mono.Cecil;
 
-namespace FastStartup.BundleCache
+namespace Morgott.Preloader.BundleCache
 {
     /// <summary>
     /// <c>[BundleCache] EagerFirstBuild</c>: the first launch after a pack update used to decompress every mod's LZMA
@@ -52,7 +52,7 @@ namespace FastStartup.BundleCache
                 Directory.CreateDirectory(_dir);
                 PromoteUpgrades(_dir);
             });
-            var scan = new Thread(() => Log.Guard("BundleCache eager scan", Scan)) { IsBackground = true, Name = "FastStartup eager scan", Priority = ThreadPriority.BelowNormal };
+            var scan = new Thread(() => Log.Guard("BundleCache eager scan", Scan)) { IsBackground = true, Name = "Morgott.Preloader eager scan", Priority = ThreadPriority.BelowNormal };
             scan.Start();
         }
 
@@ -233,7 +233,7 @@ namespace FastStartup.BundleCache
             }
             for (int i = 0; i < _workers; i++)
             {
-                new Thread(() => Log.Guard("BundleCache eager worker", Work)) { IsBackground = true, Name = "FastStartup eager " + i, Priority = ThreadPriority.BelowNormal }.Start();
+                new Thread(() => Log.Guard("BundleCache eager worker", Work)) { IsBackground = true, Name = "Morgott.Preloader eager " + i, Priority = ThreadPriority.BelowNormal }.Start();
             }
         }
 
