@@ -7,7 +7,6 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
-using BepInEx;
 using Morgott.Preloader.Core;
 using HarmonyLib;
 using Unity.Profiling;
@@ -85,35 +84,31 @@ namespace Morgott.Preloader.Profiling
         private sealed class Spike
         {
             public double T;
-            public string Utc;
-            public float Ms;
-            public string Segment;
+            public string Utc, Segment, Pos, Zone, NewShaderNames, TopSubs, Cause, ScriptTop;
+            public float Ms, Speed, ScriptMs, RenderMs, PhysicsMs, LoadingMs, OutsideMs, ProbeMs;
             public bool Teleporting, Interior, ZoneChanged, Combat;
-            public float Speed;
-            public int Mobs;
-            public string Pos, Zone;
-            public int Gc0, Gc1, Gc2;
+            public int Mobs, Gc0, Gc1, Gc2, NewPrefabs, NewShaders, NewVariants, PrevNewVariants;
             public long[] Counters;
             public int[] Calls;
             public float[] SelfMs;
             public string[] MaxName;
-            public int NewPrefabs, NewShaders, NewVariants, PrevNewVariants;
-            public string NewShaderNames;
-            public string TopSubs;
-            public float ScriptMs, RenderMs, PhysicsMs, LoadingMs, OutsideMs, ProbeMs;
-            public string Cause;
-            public string ScriptTop;
+            public bool NewVariantsNear => NewVariants + PrevNewVariants + NewShaders > 0;
         }
 
         private sealed class SegStats
         {
             public string Name;
-            public long Frames;
-            public double TotalMs;
+            public long Frames, Spikes;
+            public double TotalMs, SpikeMs;
             public float MaxMs;
-            public long Spikes;
-            public double SpikeMs;
-            public readonly int[] Hist = new int[HistBuckets];
+            public int[] Hist = new int[HistBuckets];
+
+            public SegStats Copy()
+            {
+                var c = (SegStats)MemberwiseClone();
+                c.Hist = (int[])Hist.Clone();
+                return c;
+            }
         }
 
         private const int HistBuckets = 4000; // 0.5 ms buckets up to 2 s
@@ -130,9 +125,7 @@ namespace Morgott.Preloader.Profiling
         private static long[] _acc = new long[0];
         private static long[] _sessionAcc = new long[0];
         private static int _lastIdx = -1;
-        private static long _lastTs;
-        private static long _frameStart;
-        private static int _outsideIdx;
+        private static long _lastTs, _frameStart;
 
         // Per-frame hook accumulators.
         private static readonly int[] FCalls = new int[SCount];
@@ -202,7 +195,7 @@ namespace Morgott.Preloader.Profiling
         private static int _flushedSpikes = -1;
         private static int _writing;
 
-        private static string Dir => Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader");
+        private static string Dir => Profiler.OutputDir;
 
         /// <summary>Chainloader.Initialize postfix (engine up, no plugin Awake yet): hooks now, player loop at the main menu.</summary>
         internal static void Install(Harmony harmony)
@@ -210,27 +203,20 @@ namespace Morgott.Preloader.Profiling
             _thresholdMs = Math.Max(1.0, Config.SpikeThresholdMs.Value);
             _mainThread = Thread.CurrentThread.ManagedThreadId;
             _combatTimer = AccessTools.FieldRefAccess<Humanoid, float>("m_lastCombatTimer");
-            int hooked = 0;
-            hooked += Hook(harmony, AccessTools.DeclaredMethod(typeof(ZNetScene), "CreateObject"), SCreate, nameof(CreateFin), nameof(CreatePost));
-            hooked += Hook(harmony, AccessTools.DeclaredMethod(typeof(ZoneSystem), "SpawnZone"), SZone, nameof(ZoneFin), null);
-            hooked += Hook(harmony, AccessTools.DeclaredMethod(typeof(ZoneSystem), "SpawnLocation"), SLocation, nameof(LocationFin), nameof(NamedPost));
-            hooked += Hook(harmony, AccessTools.GetDeclaredMethods(typeof(DungeonGenerator)).FirstOrDefault(m => m.Name == "PlaceRoom" && m.ReturnType == typeof(Room)),
-                SRoom, nameof(Fin), nameof(RoomPost));
+            int hooked = Hook(harmony, AccessTools.DeclaredMethod(typeof(ZNetScene), "CreateObject"), SCreate, nameof(CreateFin), nameof(CreatePost))
+                         + Hook(harmony, AccessTools.DeclaredMethod(typeof(ZoneSystem), "SpawnZone"), SZone, nameof(ZoneFin), null)
+                         + Hook(harmony, AccessTools.DeclaredMethod(typeof(ZoneSystem), "SpawnLocation"), SLocation, nameof(LocationFin), nameof(NamedPost))
+                         + Hook(harmony, AccessTools.GetDeclaredMethods(typeof(DungeonGenerator)).FirstOrDefault(m => m.Name == "PlaceRoom" && m.ReturnType == typeof(Room)),
+                             SRoom, nameof(Fin), nameof(RoomPost))
+                         + Hook(harmony, AccessTools.DeclaredMethod(typeof(Heightmap), "ForceGenerateAll"), SForceGen, nameof(Fin), null)
+                         + Hook(harmony, AccessTools.DeclaredMethod(typeof(Texture2D), "Apply", new[] { typeof(bool), typeof(bool) }), STexApply, nameof(Fin), null);
             foreach (string m in new[] { "Regenerate", "RebuildRenderMesh", "RebuildCollisionMesh" })
-            {
                 hooked += Hook(harmony, AccessTools.DeclaredMethod(typeof(Heightmap), m), SHeightmap, nameof(Fin), null);
-            }
-            hooked += Hook(harmony, AccessTools.DeclaredMethod(typeof(Heightmap), "ForceGenerateAll"), SForceGen, nameof(Fin), null);
             foreach (string m in new[] { "LoadAsset_Internal", "LoadFromFile_Internal", "LoadFromMemory_Internal", "LoadFromStreamInternal", "LoadAssetWithSubAssets_Internal" })
-            {
                 hooked += Hook(harmony, AccessTools.DeclaredMethod(typeof(AssetBundle), m), SBundle, nameof(Fin), null);
-            }
-            hooked += Hook(harmony, AccessTools.DeclaredMethod(typeof(Texture2D), "Apply", new[] { typeof(bool), typeof(bool) }), STexApply, nameof(Fin), null);
             Lifecycle.MenuReady += () => Log.Guard("Spike probe player loop", InstallLoop);
             if (Config.ScriptBreakdown.Value)
-            {
                 Lifecycle.MenuReady += () => Log.Guard("Script probe install", ScriptProbe.Install);
-            }
             Application.quitting += () => Log.Guard("Spike probe flush", () => Write(true));
             Log.Info($"Spike probe: {hooked} hooks, threshold {_thresholdMs:F0} ms; player loop at the main menu");
         }
@@ -259,11 +245,8 @@ namespace Morgott.Preloader.Profiling
 
         private static void Pre(out long __state)
         {
-            if (!_active || _depth >= StackStart.Length || Thread.CurrentThread.ManagedThreadId != _mainThread)
-            {
-                __state = 0;
-                return;
-            }
+            __state = 0;
+            if (!_active || _depth >= StackStart.Length || Thread.CurrentThread.ManagedThreadId != _mainThread) return;
             __state = Stopwatch.GetTimestamp();
             StackStart[_depth] = __state;
             StackChild[_depth] = 0;
@@ -273,97 +256,65 @@ namespace Morgott.Preloader.Profiling
         /// <summary>Self ticks of the call that ends now (hooked children subtracted), or -1 when it was not measured.</summary>
         private static long Exit(long state, int signal)
         {
-            if (state == 0 || _depth == 0)
-            {
-                return -1;
-            }
+            if (state == 0 || _depth == 0) return -1;
             long total = Stopwatch.GetTimestamp() - state;
             _depth--;
             ScriptProbe.AddChild(total, _depth);
             long self = total - StackChild[_depth];
-            if (_depth > 0)
-            {
-                StackChild[_depth - 1] += total;
-            }
+            if (_depth > 0) StackChild[_depth - 1] += total;
             FCalls[signal]++;
             FSelf[signal] += self;
             return self;
         }
 
+        /// <summary>Ends the hooked call; true when it is the slowest of its signal this frame (caller then names it).</summary>
+        private static bool Slowest(long state, int s)
+        {
+            long self = Exit(state, s);
+            if (self <= FMax[s]) return false;
+            FMax[s] = self;
+            return true;
+        }
+
         private static void Fin(long __state, MethodBase __originalMethod)
         {
-            if (__state != 0 && SignalOf.TryGetValue(__originalMethod, out int s))
-            {
-                long self = Exit(__state, s);
-                if (self > FMax[s])
-                {
-                    FMax[s] = self;
-                    FMaxKey[s] = __originalMethod.Name;
-                }
-            }
+            if (__state != 0 && SignalOf.TryGetValue(__originalMethod, out int s) && Slowest(__state, s)) FMaxKey[s] = __originalMethod.Name;
         }
 
         private static void CreateFin(long __state, ZDO zdo)
         {
-            long self = Exit(__state, SCreate);
-            if (self > FMax[SCreate])
-            {
-                FMax[SCreate] = self;
-                FMaxKey[SCreate] = zdo != null ? (object)zdo.GetPrefab() : null;
-            }
+            if (Slowest(__state, SCreate)) FMaxKey[SCreate] = zdo != null ? (object)zdo.GetPrefab() : null;
         }
 
         private static void ZoneFin(long __state, Vector2s zoneID)
         {
-            long self = Exit(__state, SZone);
-            if (self > FMax[SZone])
-            {
-                FMax[SZone] = self;
-                FMaxKey[SZone] = zoneID;
-            }
+            if (Slowest(__state, SZone)) FMaxKey[SZone] = zoneID;
         }
 
         private static void LocationFin(long __state, ZoneSystem.ZoneLocation location)
         {
-            long self = Exit(__state, SLocation);
-            if (self > FMax[SLocation])
-            {
-                FMax[SLocation] = self;
-                FMaxKey[SLocation] = location?.m_prefabName;
-            }
+            if (Slowest(__state, SLocation)) FMaxKey[SLocation] = location?.m_prefabName;
         }
 
         private static void CreatePost(GameObject __result, ZDO zdo)
         {
-            if (_active && __result != null && zdo != null && SeenNetPrefabs.Add(zdo.GetPrefab()))
-            {
-                Scan(__result);
-            }
+            if (_active && __result != null && zdo != null && SeenNetPrefabs.Add(zdo.GetPrefab())) Scan(__result);
         }
 
         private static void NamedPost(GameObject __result)
         {
-            if (_active && __result != null && SeenNamed.Add("l:" + __result.name))
-            {
-                Scan(__result);
-            }
+            if (_active && __result != null && SeenNamed.Add("l:" + __result.name)) Scan(__result);
         }
 
         private static void RoomPost(Room __result)
         {
-            if (_active && __result != null && SeenNamed.Add("r:" + __result.name))
-            {
-                Scan(__result.gameObject);
-            }
+            if (_active && __result != null && SeenNamed.Add("r:" + __result.name)) Scan(__result.gameObject);
         }
 
         /// <summary>First instance of a prefab: its shaders and (shader, keywords, instancing) combinations not seen yet.</summary>
         private static void Scan(GameObject go)
         {
-            if (Thread.CurrentThread.ManagedThreadId != _mainThread)
-            {
-                return;
-            }
+            if (Thread.CurrentThread.ManagedThreadId != _mainThread) return;
             long t0 = Stopwatch.GetTimestamp();
             _fNewPrefabs++;
             try
@@ -371,33 +322,21 @@ namespace Morgott.Preloader.Profiling
                 go.GetComponentsInChildren(true, ScanRenderers);
                 foreach (Renderer r in ScanRenderers)
                 {
-                    if (r == null)
-                    {
-                        continue;
-                    }
+                    if (r == null) continue;
                     r.GetSharedMaterials(ScanMaterials);
                     foreach (Material m in ScanMaterials)
                     {
                         // Materials are shared across prefabs and renderers: each (material, renderer kind) is looked at once.
                         int kind = r is SkinnedMeshRenderer ? 1 : r is MeshRenderer ? 0 : 2;
-                        if (m == null || !SeenMaterials.Add(((long)m.GetInstanceID() << 2) | (uint)kind))
-                        {
-                            continue;
-                        }
+                        if (m == null || !SeenMaterials.Add(((long)m.GetInstanceID() << 2) | (uint)kind)) continue;
                         Shader shader = m.shader;
-                        if (shader == null)
-                        {
-                            continue;
-                        }
+                        if (shader == null) continue;
                         int id = shader.GetInstanceID();
                         if (SeenShaders.Add(id))
                         {
                             _fNewShaders++;
                             _sessionNewShaders++;
-                            if (FNewShaderNames.Count < 6)
-                            {
-                                FNewShaderNames.Add(shader.name);
-                            }
+                            if (FNewShaderNames.Count < 6) FNewShaderNames.Add(shader.name);
                         }
                         string[] kw = m.shaderKeywords;
                         Array.Sort(kw, StringComparer.Ordinal);
@@ -422,10 +361,7 @@ namespace Morgott.Preloader.Profiling
             }
             long d = Stopwatch.GetTimestamp() - t0;
             _fProbeTicks += d;
-            if (_depth > 0)
-            {
-                StackChild[_depth - 1] += d; // probe time is not the hook's own time
-            }
+            if (_depth > 0) StackChild[_depth - 1] += d; // probe time is not the hook's own time
         }
 
         // ---- player loop ----
@@ -441,8 +377,7 @@ namespace Morgott.Preloader.Profiling
             }
             var names = new List<string>();
             var kinds = new List<int>();
-            var newTop = new List<PlayerLoopSystem>();
-            newTop.Add(Marker(Add(names, kinds, "(frame start)", "", 0), true));
+            var newTop = new List<PlayerLoopSystem> { Marker(Add(names, kinds, "(frame start)", "", 0), true) };
             foreach (PlayerLoopSystem phase in top)
             {
                 string phaseName = phase.type?.Name ?? "?";
@@ -460,8 +395,7 @@ namespace Morgott.Preloader.Profiling
                 }
                 newTop.Add(copy);
             }
-            _outsideIdx = Add(names, kinds, "(outside loop)", "", 5);
-            newTop.Add(Marker(_outsideIdx, false));
+            newTop.Add(Marker(Add(names, kinds, "(outside loop)", "", 5), false));
             root.subSystemList = newTop.ToArray();
             _subNames = names.ToArray();
             _subKind = kinds.ToArray();
@@ -479,66 +413,33 @@ namespace Morgott.Preloader.Profiling
         private static int Add(List<string> names, List<int> kinds, string name, string phase, int forced)
         {
             names.Add(name);
-            int kind = forced;
-            if (kind == 0)
-            {
-                if (phase == "TimeUpdate" || name.Contains("WaitForLastPresentation") || name.Contains("WaitForTargetFPS"))
-                {
-                    kind = 5;
-                }
-                else if (name.Contains("ScriptRun") || name.Contains("Coroutine") || name.Contains("MonoBehaviour"))
-                {
-                    kind = 1;
-                }
-                else if (name.Contains("Physics"))
-                {
-                    kind = 3;
-                }
-                else if (name.Contains("Preloading") || name.Contains("AsyncUpload") || name.Contains("AsyncRead"))
-                {
-                    kind = 4;
-                }
-                else if (phase == "PostLateUpdate")
-                {
-                    kind = 2;
-                }
-            }
-            kinds.Add(kind);
+            kinds.Add(forced != 0 ? forced
+                : phase == "TimeUpdate" || name.Contains("WaitForLastPresentation") || name.Contains("WaitForTargetFPS") ? 5
+                : name.Contains("ScriptRun") || name.Contains("Coroutine") || name.Contains("MonoBehaviour") ? 1
+                : name.Contains("Physics") ? 3
+                : name.Contains("Preloading") || name.Contains("AsyncUpload") || name.Contains("AsyncRead") ? 4
+                : phase == "PostLateUpdate" ? 2 : 0);
             return names.Count - 1;
         }
 
-        private static PlayerLoopSystem Marker(int idx, bool frameStart)
+        private static PlayerLoopSystem Marker(int idx, bool frameStart) => new PlayerLoopSystem
         {
-            PlayerLoopSystem.UpdateFunction f;
-            if (frameStart)
-            {
-                f = () => FrameStart(idx);
-            }
-            else
-            {
-                f = () => Mark(idx);
-            }
-            return new PlayerLoopSystem { type = typeof(SpikeProbe), updateDelegate = f };
-        }
+            type = typeof(SpikeProbe),
+            updateDelegate = frameStart ? new PlayerLoopSystem.UpdateFunction(() => FrameStart(idx)) : () => Mark(idx),
+        };
 
-        private static void Mark(int idx)
+        private static long Mark(int idx)
         {
             long now = Stopwatch.GetTimestamp();
-            if (_lastIdx >= 0)
-            {
-                _acc[_lastIdx] += now - _lastTs;
-            }
+            if (_lastIdx >= 0) _acc[_lastIdx] += now - _lastTs;
             _lastIdx = idx;
             _lastTs = now;
+            return now;
         }
 
         private static void FrameStart(int idx)
         {
-            long now = Stopwatch.GetTimestamp();
-            if (_lastIdx >= 0)
-            {
-                _acc[_lastIdx] += now - _lastTs;
-            }
+            long now = Mark(idx);
             if (_frameStart != 0)
             {
                 try
@@ -560,18 +461,12 @@ namespace Morgott.Preloader.Profiling
             FNewShaderNames.Clear();
             _fProbeTicks = 0;
             _depth = 0;
-            _frameStart = Stopwatch.GetTimestamp(); // after the bookkeeping: the probe's own frame-end work is not frame time
-            _lastIdx = idx;
-            _lastTs = _frameStart;
+            _frameStart = _lastTs = Stopwatch.GetTimestamp(); // after the bookkeeping: the probe's own frame-end work is not frame time
         }
 
         private static void StartRecorders()
         {
-            _counters = new ProfilerRecorder[CounterNames.Length];
-            for (int i = 0; i < CounterNames.Length; i++)
-            {
-                _counters[i] = StartRecorder(i < MemoryCounters ? ProfilerCategory.Memory : ProfilerCategory.Render, CounterNames[i]);
-            }
+            _counters = CounterNames.Select((n, i) => StartRecorder(i < MemoryCounters ? ProfilerCategory.Memory : ProfilerCategory.Render, n)).ToArray();
             _markers = new ProfilerRecorder[MarkerNames.Length];
             _markerSeen = new bool[MarkerNames.Length];
             ProfilerCategory[] cats = { ProfilerCategory.Internal, ProfilerCategory.Render, ProfilerCategory.Memory, ProfilerCategory.Loading, ProfilerCategory.Physics, ProfilerCategory.Scripts };
@@ -630,27 +525,14 @@ namespace Morgott.Preloader.Profiling
                 long v = _counters[i].Valid ? _counters[i].LastValue : 0;
                 CounterNow[i] = i < MemoryCounters ? v - CounterPrev[i] : v;
                 CounterPrev[i] = v;
-                if (v != 0)
-                {
-                    CounterSeen[i] = true;
-                }
+                if (v != 0) CounterSeen[i] = true;
             }
             for (int i = 0; i < _markers.Length; i++)
-            {
-                if (_markers[i].Valid && _markers[i].LastValue != 0)
-                {
-                    _markerSeen[i] = true;
-                }
-            }
+                if (_markers[i].Valid && _markers[i].LastValue != 0) _markerSeen[i] = true;
             int g0 = GC.CollectionCount(0), g1 = GC.CollectionCount(1), g2 = GC.CollectionCount(2);
             int d0 = g0 - _gc0, d1 = g1 - _gc1, d2 = g2 - _gc2;
-            _gc0 = g0;
-            _gc1 = g1;
-            _gc2 = g2;
-            for (int i = 0; i < _acc.Length; i++)
-            {
-                _sessionAcc[i] += _acc[i];
-            }
+            (_gc0, _gc1, _gc2) = (g0, g1, g2);
+            for (int i = 0; i < _acc.Length; i++) _sessionAcc[i] += _acc[i];
             for (int s = 0; s < SCount; s++)
             {
                 SessionCalls[s] += FCalls[s];
@@ -662,11 +544,7 @@ namespace Morgott.Preloader.Profiling
                 ScriptProbe.EndFrame(false, false, ms);
                 return;
             }
-            if (_playStart == 0)
-            {
-                _playStart = now;
-                _lastFlush = now;
-            }
+            if (_playStart == 0) _playStart = _lastFlush = now;
             Vector3 pos = player.transform.position;
             Vector2s zone = ZoneSystem.GetZone(pos);
             if (!zone.Equals(_zone))
@@ -678,19 +556,12 @@ namespace Morgott.Preloader.Profiling
             if (_seg == null || !ReferenceEquals(seg, _segName))
             {
                 _segName = seg;
-                if (!Segments.TryGetValue(seg, out _seg))
-                {
-                    _seg = new SegStats { Name = seg };
-                    Segments[seg] = _seg;
-                }
+                if (!Segments.TryGetValue(seg, out _seg)) Segments[seg] = _seg = new SegStats { Name = seg };
             }
             _seg.Frames++;
             _seg.TotalMs += ms;
             _seg.Hist[Math.Min(HistBuckets - 1, (int)(ms * 2))]++;
-            if (ms > _seg.MaxMs)
-            {
-                _seg.MaxMs = (float)ms;
-            }
+            _seg.MaxMs = Math.Max(_seg.MaxMs, (float)ms);
             bool spike = ms >= _thresholdMs;
             string scriptTop = ScriptProbe.EndFrame(true, spike, ms);
             if (spike)
@@ -704,9 +575,9 @@ namespace Morgott.Preloader.Profiling
                     Spikes.Add(s);
                 }
             }
-            long spent = Stopwatch.GetTimestamp() - t0;
-            _probeTicks += spent + _fProbeTicks;
-            _probeMaxTicks = Math.Max(_probeMaxTicks, spent + _fProbeTicks);
+            long spent = Stopwatch.GetTimestamp() - t0 + _fProbeTicks;
+            _probeTicks += spent;
+            _probeMaxTicks = Math.Max(_probeMaxTicks, spent);
             _probeFrames++;
             if ((now - _lastFlush) * MsPerTick > 30000)
             {
@@ -714,6 +585,8 @@ namespace Morgott.Preloader.Profiling
                 Write(false);
             }
         }
+
+        private static string Inv(FormattableString s) => FormattableString.Invariant(s);
 
         private static Spike Record(Player player, Vector3 pos, Vector2s zone, long now, double ms, int d0, int d1, int d2)
         {
@@ -727,9 +600,8 @@ namespace Morgott.Preloader.Profiling
                 Interior = player.InInterior(),
                 ZoneChanged = (now - _zoneChangedAt) * MsPerTick < 1000,
                 Speed = player.GetVelocity().magnitude,
-                Pos = ((int)pos.x).ToString(CultureInfo.InvariantCulture) + "," + ((int)pos.y).ToString(CultureInfo.InvariantCulture) + "," +
-                      ((int)pos.z).ToString(CultureInfo.InvariantCulture),
-                Zone = zone.x.ToString(CultureInfo.InvariantCulture) + "," + zone.y.ToString(CultureInfo.InvariantCulture),
+                Pos = Inv($"{(int)pos.x},{(int)pos.y},{(int)pos.z}"),
+                Zone = Inv($"{zone.x},{zone.y}"),
                 Gc0 = d0,
                 Gc1 = d1,
                 Gc2 = d2,
@@ -747,13 +619,8 @@ namespace Morgott.Preloader.Profiling
             try
             {
                 s.Combat = _combatTimer(player) < 5f;
-                foreach (Character c in Character.GetAllCharacters())
-                {
-                    if (c != null && c != player && !c.IsPlayer() && !c.IsTamed() && !c.IsDead() && (c.transform.position - pos).sqrMagnitude < 900f)
-                    {
-                        s.Mobs++;
-                    }
-                }
+                s.Mobs = Character.GetAllCharacters().Count(c => c != null && c != player && !c.IsPlayer() && !c.IsTamed() && !c.IsDead() &&
+                                                                  (c.transform.position - pos).sqrMagnitude < 900f);
             }
             catch (Exception)
             {
@@ -762,21 +629,15 @@ namespace Morgott.Preloader.Profiling
             for (int i = 0; i < SCount; i++)
             {
                 object key = FMaxKey[i];
-                if (key == null || FMax[i] * MsPerTick < 0.5)
+                if (key == null || FMax[i] * MsPerTick < 0.5) continue;
+                string name = key switch
                 {
-                    continue;
-                }
-                string name = key as string;
-                if (key is int hash)
-                {
-                    GameObject prefab = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(hash) : null;
-                    name = prefab != null ? prefab.name : hash.ToString(CultureInfo.InvariantCulture);
-                }
-                else if (key is Vector2s z)
-                {
-                    name = z.x.ToString(CultureInfo.InvariantCulture) + "," + z.y.ToString(CultureInfo.InvariantCulture);
-                }
-                s.MaxName[i] = name + " " + (FMax[i] * MsPerTick).ToString("F1", CultureInfo.InvariantCulture);
+                    int hash => (ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(hash) : null) is GameObject prefab && prefab != null
+                        ? prefab.name : hash.ToString(CultureInfo.InvariantCulture),
+                    Vector2s z => Inv($"{z.x},{z.y}"),
+                    _ => key as string,
+                };
+                s.MaxName[i] = name + " " + F(FMax[i] * MsPerTick);
             }
             var top = new List<(int i, long t)>();
             for (int i = 0; i < _acc.Length; i++)
@@ -790,13 +651,9 @@ namespace Morgott.Preloader.Profiling
                     case 4: s.LoadingMs += (float)m; break;
                     case 5: s.OutsideMs += (float)m; break;
                 }
-                if (m >= 1.0)
-                {
-                    top.Add((i, _acc[i]));
-                }
+                if (m >= 1.0) top.Add((i, _acc[i]));
             }
-            s.TopSubs = string.Join("; ", top.OrderByDescending(x => x.t).Take(4)
-                .Select(x => _subNames[x.i] + " " + (x.t * MsPerTick).ToString("F1", CultureInfo.InvariantCulture)).ToArray());
+            s.TopSubs = string.Join("; ", top.OrderByDescending(x => x.t).Take(4).Select(x => _subNames[x.i] + " " + F(x.t * MsPerTick)).ToArray());
             s.Cause = Classify(s, top);
             return s;
         }
@@ -808,38 +665,17 @@ namespace Morgott.Preloader.Profiling
         {
             string best = null;
             float bestMs = 0;
-            for (int i = 0; i < SCount; i++)
-            {
-                if (s.SelfMs[i] > bestMs)
-                {
-                    bestMs = s.SelfMs[i];
-                    best = SignalNames[i];
-                }
-            }
-            float scripts = Residual(s);
             void Consider(string name, float v)
             {
-                if (v > bestMs)
-                {
-                    bestMs = v;
-                    best = name;
-                }
+                if (v > bestMs) (bestMs, best) = (v, name);
             }
-            bool gc = s.Gc0 + s.Gc1 + s.Gc2 > 0;
-            Consider(gc ? "scripts+gc" : "scripts", scripts);
-            Consider(s.NewVariants + s.PrevNewVariants + s.NewShaders > 0 ? "render+newVariants" : "render", s.RenderMs);
+            for (int i = 0; i < SCount; i++) Consider(SignalNames[i], s.SelfMs[i]);
+            Consider(s.Gc0 + s.Gc1 + s.Gc2 > 0 ? "scripts+gc" : "scripts", Residual(s));
+            Consider(s.NewVariantsNear ? "render+newVariants" : "render", s.RenderMs);
             Consider("physics", s.PhysicsMs);
             Consider("loading", s.LoadingMs);
-            Consider(s.NewVariants + s.PrevNewVariants + s.NewShaders > 0 ? "present+newVariants" : "present", s.OutsideMs);
-            float otherMs = 0;
-            foreach ((int i, long t) in top)
-            {
-                if (_subKind[i] == 0)
-                {
-                    otherMs = Math.Max(otherMs, (float)(t * MsPerTick));
-                }
-            }
-            Consider("other", otherMs);
+            Consider(s.NewVariantsNear ? "present+newVariants" : "present", s.OutsideMs);
+            Consider("other", top.Where(x => _subKind[x.i] == 0).Select(x => (float)(x.t * MsPerTick)).DefaultIfEmpty(0f).Max());
             return best ?? "other";
         }
 
@@ -850,17 +686,10 @@ namespace Morgott.Preloader.Profiling
 
         private static void Write(bool sync)
         {
-            if (!_active || _playStart == 0)
-            {
-                return;
-            }
-            if (!sync && Spikes.Count == _flushedSpikes)
-            {
-                return;
-            }
+            if (!_active || _playStart == 0 || (!sync && Spikes.Count == _flushedSpikes)) return;
             _flushedSpikes = Spikes.Count;
             Spike[] spikes = Spikes.ToArray();
-            SegStats[] segs = Segments.Values.Select(Copy).ToArray();
+            SegStats[] segs = Segments.Values.Select(s => s.Copy()).ToArray();
             long[] sessionAcc = (long[])_sessionAcc.Clone();
             long[] calls = (long[])SessionCalls.Clone();
             long[] self = (long[])SessionSelf.Clone();
@@ -873,10 +702,7 @@ namespace Morgott.Preloader.Profiling
             string firstSeen = $"first seen this session: {SeenNetPrefabs.Count} net prefabs, {SeenNamed.Count} locations/rooms, {_sessionNewShaders} shaders, {_sessionNewVariants} shader/keyword combinations";
             void Run()
             {
-                if (Interlocked.Exchange(ref _writing, 1) != 0)
-                {
-                    return;
-                }
+                if (Interlocked.Exchange(ref _writing, 1) != 0) return;
                 try
                 {
                     Directory.CreateDirectory(Dir);
@@ -894,75 +720,46 @@ namespace Morgott.Preloader.Profiling
                     Interlocked.Exchange(ref _writing, 0);
                 }
             }
-            if (sync)
-            {
-                while (Volatile.Read(ref _writing) != 0)
-                {
-                    Thread.Sleep(10);
-                }
-                Run();
-            }
-            else
+            if (!sync)
             {
                 ThreadPool.QueueUserWorkItem(_ => Run());
+                return;
             }
+            while (Volatile.Read(ref _writing) != 0) Thread.Sleep(10);
+            Run();
         }
 
-        private static SegStats Copy(SegStats s)
-        {
-            var c = new SegStats { Name = s.Name, Frames = s.Frames, TotalMs = s.TotalMs, MaxMs = s.MaxMs, Spikes = s.Spikes, SpikeMs = s.SpikeMs };
-            Array.Copy(s.Hist, c.Hist, HistBuckets);
-            return c;
-        }
-
-        private static string F(double v) => v.ToString("F1", CultureInfo.InvariantCulture);
+        internal static string F(double v) => v.ToString("F1", CultureInfo.InvariantCulture);
 
         private static string Tsv(Spike[] spikes)
         {
             var sb = new StringBuilder();
             sb.Append("t\tutc\tms\tcause\tsegment\tteleporting\tinterior\tzoneChanged\tspeed\tmobs\tcombat\tpos\tzone\tgc0\tgc1\tgc2");
-            foreach (string c in CounterNames)
-            {
-                sb.Append('\t').Append(c.Replace(' ', '_'));
-            }
-            foreach (string n in SignalNames)
-            {
-                sb.Append('\t').Append(n).Append("_n\t").Append(n).Append("_ms\t").Append(n).Append("_max");
-            }
+            foreach (string c in CounterNames) sb.Append('\t').Append(c.Replace(' ', '_'));
+            foreach (string n in SignalNames) sb.Append('\t').Append(n).Append("_n\t").Append(n).Append("_ms\t").Append(n).Append("_max");
             sb.Append("\tnewPrefabs\tnewShaders\tnewVariants\tprevNewVariants\tnewShaderNames\tscriptMs\trenderMs\tphysicsMs\tloadingMs\toutsideMs\tprobeMs\ttopSubsystems\tscriptTop\n");
             foreach (Spike s in spikes)
             {
-                sb.Append(s.T.ToString("F2", CultureInfo.InvariantCulture)).Append('\t').Append(s.Utc).Append('\t').Append(F(s.Ms)).Append('\t').Append(s.Cause)
-                    .Append('\t').Append(s.Segment).Append('\t').Append(s.Teleporting ? 1 : 0).Append('\t').Append(s.Interior ? 1 : 0).Append('\t')
-                    .Append(s.ZoneChanged ? 1 : 0).Append('\t').Append(F(s.Speed)).Append('\t').Append(s.Mobs).Append('\t').Append(s.Combat ? 1 : 0)
-                    .Append('\t').Append(s.Pos).Append('\t').Append(s.Zone).Append('\t').Append(s.Gc0).Append('\t').Append(s.Gc1).Append('\t').Append(s.Gc2);
+                sb.Append(string.Join("\t", s.T.ToString("F2", CultureInfo.InvariantCulture), s.Utc, F(s.Ms), s.Cause, s.Segment, B(s.Teleporting), B(s.Interior),
+                    B(s.ZoneChanged), F(s.Speed), s.Mobs, B(s.Combat), s.Pos, s.Zone, s.Gc0, s.Gc1, s.Gc2));
                 for (int i = 0; i < s.Counters.Length; i++)
-                {
                     sb.Append('\t').Append(i < MemoryCounters ? (s.Counters[i] / 1024).ToString(CultureInfo.InvariantCulture) + "KB" : s.Counters[i].ToString(CultureInfo.InvariantCulture));
-                }
-                for (int i = 0; i < SCount; i++)
-                {
-                    sb.Append('\t').Append(s.Calls[i]).Append('\t').Append(F(s.SelfMs[i])).Append('\t').Append(s.MaxName[i] ?? "");
-                }
-                sb.Append('\t').Append(s.NewPrefabs).Append('\t').Append(s.NewShaders).Append('\t').Append(s.NewVariants).Append('\t').Append(s.PrevNewVariants)
-                    .Append('\t').Append(s.NewShaderNames).Append('\t').Append(F(s.ScriptMs)).Append('\t').Append(F(s.RenderMs)).Append('\t').Append(F(s.PhysicsMs))
-                    .Append('\t').Append(F(s.LoadingMs)).Append('\t').Append(F(s.OutsideMs)).Append('\t').Append(s.ProbeMs.ToString("F2", CultureInfo.InvariantCulture))
-                    .Append('\t').Append(s.TopSubs).Append('\t').Append(s.ScriptTop ?? "").Append('\n');
+                for (int i = 0; i < SCount; i++) sb.Append('\t').Append(s.Calls[i]).Append('\t').Append(F(s.SelfMs[i])).Append('\t').Append(s.MaxName[i] ?? "");
+                sb.Append('\t').Append(string.Join("\t", s.NewPrefabs, s.NewShaders, s.NewVariants, s.PrevNewVariants, s.NewShaderNames, F(s.ScriptMs), F(s.RenderMs),
+                    F(s.PhysicsMs), F(s.LoadingMs), F(s.OutsideMs), s.ProbeMs.ToString("F2", CultureInfo.InvariantCulture), s.TopSubs, s.ScriptTop ?? "")).Append('\n');
             }
             return sb.ToString();
         }
 
+        private static int B(bool v) => v ? 1 : 0;
+
         private static double Pct(int[] hist, long n, double q)
         {
-            long want = (long)Math.Ceiling(n * q);
-            long seen = 0;
+            long want = (long)Math.Ceiling(n * q), seen = 0;
             for (int i = 0; i < hist.Length; i++)
             {
                 seen += hist[i];
-                if (seen >= want && want > 0)
-                {
-                    return (i + 1) * 0.5;
-                }
+                if (seen >= want && want > 0) return (i + 1) * 0.5;
             }
             return 0;
         }
@@ -971,11 +768,12 @@ namespace Morgott.Preloader.Profiling
             bool[] markerValid, bool[] markerSeen, string probe, string firstSeen)
         {
             var sb = new StringBuilder();
+            void L(string format, params object[] args) => sb.Append(string.Format(CultureInfo.InvariantCulture, format, args)).Append('\n');
             sb.Append("Morgott.Preloader spike probe - ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append(" - threshold ")
                 .Append(F(_thresholdMs)).Append(" ms - logical cores Environment=").Append(Environment.ProcessorCount).Append(" SystemInfo=")
                 .Append(SystemInfo.processorCount).Append(" JobWorkerCount=").Append(JobsUtility.JobWorkerCount).Append('/').Append(JobsUtility.JobWorkerMaximumCount).Append('\n').Append(probe).Append('\n').Append(firstSeen).Append("\n\n");
             sb.Append("== frame time per segment (play frames, p = upper bound of a 0.5 ms bucket)\n");
-            sb.Append(string.Format(CultureInfo.InvariantCulture, "{0,-18} {1,7} {2,7} {3,7} {4,7} {5,7} {6,8} {7,6} {8,9}\n", "segment", "frames", "avg", "p50", "p99", "p99.9", "max", "spikes", "spikeMs"));
+            L("{0,-18} {1,7} {2,7} {3,7} {4,7} {5,7} {6,8} {7,6} {8,9}", "segment", "frames", "avg", "p50", "p99", "p99.9", "max", "spikes", "spikeMs");
             var all = new SegStats { Name = "ALL" };
             foreach (SegStats s in segs)
             {
@@ -984,24 +782,21 @@ namespace Morgott.Preloader.Profiling
                 all.MaxMs = Math.Max(all.MaxMs, s.MaxMs);
                 all.Spikes += s.Spikes;
                 all.SpikeMs += s.SpikeMs;
-                for (int i = 0; i < HistBuckets; i++)
-                {
-                    all.Hist[i] += s.Hist[i];
-                }
+                for (int i = 0; i < HistBuckets; i++) all.Hist[i] += s.Hist[i];
             }
             foreach (SegStats s in segs.Concat(new[] { all }))
             {
-                sb.Append(string.Format(CultureInfo.InvariantCulture, "{0,-18} {1,7} {2,7:F1} {3,7:F1} {4,7:F1} {5,7:F1} {6,8:F1} {7,6} {8,9:F0}\n", s.Name, s.Frames,
-                    s.Frames > 0 ? s.TotalMs / s.Frames : 0, Pct(s.Hist, s.Frames, 0.5), Pct(s.Hist, s.Frames, 0.99), Pct(s.Hist, s.Frames, 0.999), s.MaxMs, s.Spikes, s.SpikeMs));
+                L("{0,-18} {1,7} {2,7:F1} {3,7:F1} {4,7:F1} {5,7:F1} {6,8:F1} {7,6} {8,9:F0}", s.Name, s.Frames,
+                    s.Frames > 0 ? s.TotalMs / s.Frames : 0, Pct(s.Hist, s.Frames, 0.5), Pct(s.Hist, s.Frames, 0.99), Pct(s.Hist, s.Frames, 0.999), s.MaxMs, s.Spikes, s.SpikeMs);
             }
             double p50 = Pct(all.Hist, all.Frames, 0.5);
             sb.Append("\n== causes ranked by total spike ms (cause = largest of: hook self times, script residual, render, physics, loading, outside, other)\n");
-            sb.Append(string.Format(CultureInfo.InvariantCulture, "{0,-20} {1,6} {2,9} {3,9} {4,8} {5,6} {6,6}  {7}\n", "cause", "count", "totalMs", "excessMs", "maxMs", "telep", "newVar", "owner"));
+            L("{0,-20} {1,6} {2,9} {3,9} {4,8} {5,6} {6,6}  {7}", "cause", "count", "totalMs", "excessMs", "maxMs", "telep", "newVar", "owner");
             foreach (var g in spikes.GroupBy(s => s.Cause).OrderByDescending(g => g.Sum(s => s.Ms)))
             {
                 Owners.TryGetValue(g.Key, out string owner);
-                sb.Append(string.Format(CultureInfo.InvariantCulture, "{0,-20} {1,6} {2,9:F0} {3,9:F0} {4,8:F1} {5,6} {6,6}  {7}\n", g.Key, g.Count(), g.Sum(s => s.Ms),
-                    g.Sum(s => Math.Max(0, s.Ms - p50)), g.Max(s => s.Ms), g.Count(s => s.Teleporting), g.Count(s => s.NewVariants + s.PrevNewVariants > 0), owner));
+                L("{0,-20} {1,6} {2,9:F0} {3,9:F0} {4,8:F1} {5,6} {6,6}  {7}", g.Key, g.Count(), g.Sum(s => s.Ms),
+                    g.Sum(s => Math.Max(0, s.Ms - p50)), g.Max(s => s.Ms), g.Count(s => s.Teleporting), g.Count(s => s.NewVariants + s.PrevNewVariants > 0), owner);
             }
             sb.Append("\n== causes per segment\n");
             foreach (var seg in spikes.GroupBy(s => s.Segment))
@@ -1013,17 +808,16 @@ namespace Morgott.Preloader.Profiling
             for (int i = 0; i < SCount; i++)
             {
                 int idx = i;
-                sb.Append(string.Format(CultureInfo.InvariantCulture, "{0,-18} spikes: {1,6} calls {2,9:F1} ms   session: {3,8} calls {4,9:F1} ms\n", SignalNames[i],
-                    spikes.Sum(s => s.Calls[idx]), spikes.Sum(s => s.SelfMs[idx]), calls[i], self[i] * MsPerTick));
+                L("{0,-18} spikes: {1,6} calls {2,9:F1} ms   session: {3,8} calls {4,9:F1} ms", SignalNames[i],
+                    spikes.Sum(s => s.Calls[idx]), spikes.Sum(s => s.SelfMs[idx]), calls[i], self[i] * MsPerTick);
             }
-            int withNew = spikes.Count(s => s.NewVariants + s.PrevNewVariants + s.NewShaders > 0);
-            sb.Append(string.Format(CultureInfo.InvariantCulture, "\n== first-seen shader correlation: {0} of {1} spike frames had first-seen shader variants in the frame or the one before ({2:F0} of {3:F0} ms)\n",
-                withNew, spikes.Length, spikes.Where(s => s.NewVariants + s.PrevNewVariants + s.NewShaders > 0).Sum(s => s.Ms), spikes.Sum(s => s.Ms)));
+            Spike[] withNew = spikes.Where(s => s.NewVariantsNear).ToArray();
+            sb.Append('\n');
+            L("== first-seen shader correlation: {0} of {1} spike frames had first-seen shader variants in the frame or the one before ({2:F0} of {3:F0} ms)",
+                withNew.Length, spikes.Length, withNew.Sum(s => s.Ms), spikes.Sum(s => s.Ms));
             sb.Append("\n== session time per player-loop subsystem (top 25, all frames incl. menu/loading)\n");
             foreach (int i in Enumerable.Range(0, sessionAcc.Length).OrderByDescending(i => sessionAcc[i]).Take(25))
-            {
-                sb.Append(string.Format(CultureInfo.InvariantCulture, "{0,-60} {1,10:F0} ms\n", _subNames[i], sessionAcc[i] * MsPerTick));
-            }
+                L("{0,-60} {1,10:F0} ms", _subNames[i], sessionAcc[i] * MsPerTick);
             sb.Append("\n== top 40 spike frames\n");
             foreach (Spike s in spikes.OrderByDescending(s => s.Ms).Take(40))
             {
@@ -1031,35 +825,23 @@ namespace Morgott.Preloader.Profiling
                     s.Teleporting ? "TP " : "", s.Interior ? "IN " : "", s.ZoneChanged ? "ZONE " : "", s.Speed, s.Mobs, s.Gc0, s.Gc1, s.Gc2));
                 for (int i = 0; i < SCount; i++)
                 {
-                    if (s.Calls[i] > 0 && s.SelfMs[i] >= 0.5f)
-                    {
-                        sb.Append(SignalNames[i]).Append(' ').Append(s.Calls[i]).Append("x ").Append(F(s.SelfMs[i])).Append("ms");
-                        if (s.MaxName[i] != null)
-                        {
-                            sb.Append(" (max ").Append(s.MaxName[i]).Append(')');
-                        }
-                        sb.Append("; ");
-                    }
+                    if (s.Calls[i] == 0 || s.SelfMs[i] < 0.5f) continue;
+                    sb.Append(SignalNames[i]).Append(' ').Append(s.Calls[i]).Append("x ").Append(F(s.SelfMs[i])).Append("ms");
+                    if (s.MaxName[i] != null) sb.Append(" (max ").Append(s.MaxName[i]).Append(')');
+                    sb.Append("; ");
                 }
                 sb.Append("new ").Append(s.NewPrefabs).Append(" prefabs/").Append(s.NewShaders).Append(" shaders/").Append(s.NewVariants).Append('+').Append(s.PrevNewVariants)
                     .Append(" var | script ").Append(F(s.ScriptMs)).Append(" render ").Append(F(s.RenderMs)).Append(" phys ").Append(F(s.PhysicsMs)).Append(" | ")
                     .Append(s.TopSubs);
-                if (s.NewShaderNames.Length > 0)
-                {
-                    sb.Append(" | shaders ").Append(s.NewShaderNames);
-                }
+                if (s.NewShaderNames.Length > 0) sb.Append(" | shaders ").Append(s.NewShaderNames);
                 sb.Append(" | setpass ").Append(s.Counters[4]).Append(" draws ").Append(s.Counters[5]).Append(" vbKB ").Append(s.Counters[7] / 1024)
                     .Append(" gcUsedKB ").Append(s.Counters[0] / 1024).Append(" totalUsedKB ").Append(s.Counters[2] / 1024).Append('\n');
             }
             sb.Append("\n== ProfilerRecorder in this player (valid = handle resolved, nonzero = ever reported a value; profiler-available.txt lists every metric)\n");
             for (int i = 0; i < CounterNames.Length; i++)
-            {
                 sb.Append("counter ").Append(CounterNames[i]).Append(": valid=").Append(i < _counters.Length && _counters[i].Valid).Append(" nonzero=").Append(counterSeen[i]).Append('\n');
-            }
             for (int i = 0; i < MarkerNames.Length && i < markerValid.Length; i++)
-            {
                 sb.Append("marker ").Append(MarkerNames[i]).Append(": valid=").Append(markerValid[i]).Append(" nonzero=").Append(markerSeen[i]).Append('\n');
-            }
             sb.Append("metrics available=").Append(_availableMetrics).Append(" frameTimingStats=").Append(_frameTimingEnabled).Append('\n');
             return sb.ToString();
         }

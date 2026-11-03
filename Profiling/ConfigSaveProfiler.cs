@@ -22,15 +22,12 @@ namespace Morgott.Preloader.Profiling
                 finalizer: new HarmonyMethod(AccessTools.Method(typeof(ConfigSaveProfiler), nameof(Finalizer)), Priority.Last));
         }
 
-        private static void Prefix() => (_spans ?? (_spans = new SpanStack())).Push();
+        private static void Prefix() => (_spans ??= new SpanStack()).Push();
 
         private static void Finalizer(ConfigFile __instance)
         {
             long start = _spans?.Pop() ?? 0;
-            if (start != 0)
-            {
-                StartupTrace.Complete("config", "ConfigFile.Save", start, StartupTrace.Now(), Path.GetFileName(__instance.ConfigFilePath));
-            }
+            if (start != 0) StartupTrace.Complete("config", "ConfigFile.Save", start, StartupTrace.Now(), Path.GetFileName(__instance.ConfigFilePath));
         }
     }
 }

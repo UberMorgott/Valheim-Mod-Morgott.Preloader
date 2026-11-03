@@ -8,14 +8,10 @@ namespace Morgott.Preloader.Profiling
     /// <summary>One recorded event. Times are raw <see cref="Stopwatch.GetTimestamp"/> ticks.</summary>
     internal sealed class TraceEvent
     {
-        public string Cat;
-        public string Name;
+        public string Cat, Name, Detail, Detail2;
         public char Ph; // 'X' = complete span, 'i' = instant
-        public long Start;
-        public long End;
+        public long Start, End;
         public int Tid;
-        public string Detail;
-        public string Detail2;
         public long Bytes = -1;
         public int Depth; // harmony nesting depth at record time (1 = outermost Harmony API call)
         public string Args; // preformatted JSON object body for rare events (GC snapshots)
@@ -71,21 +67,16 @@ namespace Morgott.Preloader.Profiling
             MainThreadId = Environment.CurrentManagedThreadId;
             Recording = true;
             if (ProcessStartKnown)
-            {
                 Complete("lifecycle", "process start -> Morgott.Preloader.Initialize", ProcessStart, now,
                     "Unity boot, Doorstop, BepInEx preloader start, Cecil read of all Managed assemblies");
-            }
             Mark("patcher.Initialize");
         }
 
         public static void Complete(string cat, string name, long start, long end, string detail = null,
             string detail2 = null, long bytes = -1, int tid = -1, int depth = 0)
         {
-            if (!Recording)
-            {
-                return;
-            }
-            var e = new TraceEvent
+            if (!Recording) return;
+            Add(new TraceEvent
             {
                 Cat = cat,
                 Name = name,
@@ -97,7 +88,11 @@ namespace Morgott.Preloader.Profiling
                 Detail2 = detail2,
                 Bytes = bytes,
                 Depth = depth,
-            };
+            });
+        }
+
+        private static void Add(TraceEvent e)
+        {
             lock (Lock)
             {
                 Events.Add(e);
@@ -107,28 +102,20 @@ namespace Morgott.Preloader.Profiling
         /// <summary>Lifecycle boundary: an instant with GC collection counts and managed heap size.</summary>
         public static void Mark(string name, string detail = null)
         {
-            if (!Recording)
-            {
-                return;
-            }
-            var e = new TraceEvent
+            if (!Recording) return;
+            long now = Now();
+            Add(new TraceEvent
             {
                 Cat = "mark",
                 Name = name,
                 Ph = 'i',
-                Start = Now(),
+                Start = now,
+                End = now,
                 Tid = Environment.CurrentManagedThreadId,
                 Detail = detail,
-                Args = string.Format(CultureInfo.InvariantCulture,
-                    "\"gc0\":{0},\"gc1\":{1},\"gc2\":{2},\"heapMB\":{3:F1}",
-                    GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2),
-                    GC.GetTotalMemory(false) / (1024.0 * 1024.0)),
-            };
-            e.End = e.Start;
-            lock (Lock)
-            {
-                Events.Add(e);
-            }
+                Args = string.Format(CultureInfo.InvariantCulture, "\"gc0\":{0},\"gc1\":{1},\"gc2\":{2},\"heapMB\":{3:F1}",
+                    GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2), GC.GetTotalMemory(false) / (1024.0 * 1024.0)),
+            });
         }
 
         /// <summary>Stops recording and returns everything recorded so far.</summary>
