@@ -17,6 +17,10 @@
     <!-- The real Unity-free sources, not copies. -->
     <Compile Include="..\BundleCache\LzmaDecoder.cs" Link="src\LzmaDecoder.cs" />
     <Compile Include="..\BundleCache\BundleHeader.cs" Link="src\BundleHeader.cs" />
+    <Compile Include="..\BundleCache\BundleConverter.cs" Link="src\BundleConverter.cs" />
+    <Compile Include="..\BundleCache\CacheStore.cs" Link="src\CacheStore.cs" />
+    <Compile Include="..\BundleCache\ResourceSource.cs" Link="src\ResourceSource.cs" />
+    <Compile Include="..\Core\AtomicFile.cs" Link="src\AtomicFile.cs" />
     <None Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

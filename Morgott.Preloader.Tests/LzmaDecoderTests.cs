@@ -11,9 +11,9 @@ namespace Morgott.Preloader.Tests
     {
         // Data\lines.lzma = liblzma (Python lzma, FORMAT_ALONE) output for Expected() with the 8 size bytes cut out:
         // 5 property bytes + range-coded stream ending in an end marker. Independent encoder = known-answer vector.
-        private static byte[] Vector() => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "lines.lzma"));
+        internal static byte[] Vector() => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", "lines.lzma"));
 
-        private static byte[] Expected()
+        internal static byte[] Expected()
         {
             var sb = new StringBuilder();
             for (int i = 0; i < 20000; i++)
