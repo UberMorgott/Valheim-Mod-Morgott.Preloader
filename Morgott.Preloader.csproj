@@ -16,6 +16,12 @@
     <ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>true</ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The test project is not patcher code. -->
+    <Compile Remove="Morgott.Preloader.Tests\**" />
+    <None Remove="Morgott.Preloader.Tests\**" />
+  </ItemGroup>
+
   <!--
     A preloader patcher is loaded before the chainloader, so it references the exact BepInEx/HarmonyX/MonoMod
     copies shipped in BepInEx\core (BepInEx + 0Harmony via the shared props) instead of NuGet packages.
