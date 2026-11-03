@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Text;
 
@@ -20,7 +21,7 @@ namespace Morgott.Preloader.Core
             {
                 File.Replace(temp, path, null);
             }
-            catch (System.Exception e) when (e is IOException || e is System.PlatformNotSupportedException)
+            catch (Exception e) when (e is IOException || e is PlatformNotSupportedException)
             {
                 // Mono without ReplaceFile support: overwrite-copy is still whole-file, just not atomic.
                 File.Copy(temp, path, true);

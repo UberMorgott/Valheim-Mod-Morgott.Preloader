@@ -21,6 +21,7 @@
     <Compile Include="..\BundleCache\CacheStore.cs" Link="src\CacheStore.cs" />
     <Compile Include="..\BundleCache\ResourceSource.cs" Link="src\ResourceSource.cs" />
     <Compile Include="..\Core\AtomicFile.cs" Link="src\AtomicFile.cs" />
+    <Compile Include="..\Core\Hash.cs" Link="src\Hash.cs" />
     <None Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

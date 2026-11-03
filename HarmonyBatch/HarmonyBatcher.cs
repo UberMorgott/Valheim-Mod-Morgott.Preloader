@@ -9,22 +9,15 @@ using MonoMod.RuntimeDetour;
 namespace Morgott.Preloader.HarmonyBatch
 {
     /// <summary>
-    /// HarmonyX 2.9 (BepInEx\core\0Harmony.dll) registers a patch in the method's <c>PatchInfo</c> and then rebuilds the
-    /// whole replacement at once (<c>PatchFunctions.UpdateWrapper</c>: IL copy + every patch + JIT + detour), so a
-    /// method patched by N classes of one <c>Harmony.PatchAll(assembly)</c> is built N times. Inside one outermost
-    /// PatchAll call on a thread this module records the method instead of building it and builds each recorded
-    /// method once when that PatchAll returns (finalizer: also when it throws), from the same <c>PatchInfo</c> the
-    /// last immediate build would have used. Registration (<c>Harmony.GetPatchInfo</c>) is untouched.
-    ///
-    /// Inlining: a built wrapper is JIT-compiled at once; Mono inlines small callees that are not marked NoInlining
-    /// yet, and a detour placed on such a callee later is bypassed by that caller. Deferring builds would reorder
-    /// detours relative to caller builds (the root cause of StartupAccelerator dropping MorgottTweaks' prefix on the
-    /// iterator factory <c>FejdStartup.TryPlayIntroCinematic</c>: <c>FejdStartup.Start</c>'s wrapper was built first
-    /// and inlined it). So every recorded method is pinned (<c>DetourHelper.Pin</c>: MonoMod's NoInlining flag +
-    /// prepare, the same call its detour makes) at the moment it would have been detoured, before any later build.
-    ///
-    /// Scope: only <c>PatchAll(Assembly)</c> (and <c>PatchAll()</c>, which calls it). <c>Harmony.Patch</c>,
-    /// <c>PatchAll(Type)</c> and patches made outside PatchAll build immediately, as before.
+    /// HarmonyX 2.9 rebuilds a method's whole replacement (<c>PatchFunctions.UpdateWrapper</c>: IL copy + every patch +
+    /// JIT + detour) per registered patch, so a method patched by N classes of one <c>Harmony.PatchAll(assembly)</c> is
+    /// built N times. Inside one outermost PatchAll(Assembly) on a thread this module records the method instead and
+    /// builds each once when that PatchAll returns (finalizer: also when it throws), from the same <c>PatchInfo</c>.
+    /// Registration is untouched; <c>Harmony.Patch</c> / <c>PatchAll(Type)</c> build immediately as before.
+    /// Inlining: Mono inlines small callees into a freshly JIT-ed wrapper, and a later detour on such a callee is
+    /// bypassed (StartupAccelerator once lost MorgottTweaks' prefix on <c>FejdStartup.TryPlayIntroCinematic</c> this way),
+    /// so every recorded method is pinned (<c>DetourHelper.Pin</c>, same as its detour does) at the moment it would
+    /// have been detoured.
     /// </summary>
     internal static class HarmonyBatcher
     {
@@ -58,34 +51,27 @@ namespace Morgott.Preloader.HarmonyBatch
             _updateWrapper = AccessTools.MethodDelegate<Func<MethodBase, PatchInfo, MethodInfo>>(updateWrapper);
             _addReplacementOriginal = AccessTools.MethodDelegate<Action<MethodBase, MethodInfo>>(addReplacementOriginal);
             _patchLock = locker.GetValue(null);
-            harmony.Patch(updateWrapper,
-                prefix: new HarmonyMethod(AccessTools.Method(typeof(HarmonyBatcher), nameof(UpdateWrapperPrefix)), Priority.First));
+            harmony.Patch(updateWrapper, prefix: Hook(nameof(UpdateWrapperPrefix)));
             // Finalizer First: runs before the profiler's Last finalizer, so the flush is timed inside this PatchAll.
-            harmony.Patch(patchAll,
-                prefix: new HarmonyMethod(AccessTools.Method(typeof(HarmonyBatcher), nameof(PatchAllPrefix)), Priority.First),
-                finalizer: new HarmonyMethod(AccessTools.Method(typeof(HarmonyBatcher), nameof(PatchAllFinalizer)), Priority.First));
+            harmony.Patch(patchAll, prefix: Hook(nameof(PatchAllPrefix)), finalizer: Hook(nameof(PatchAllFinalizer)));
             Lifecycle.MenuReady += () =>
                 Log.Info($"HarmonyBatching: {_batches} PatchAll calls, {_deferred} wrapper builds deferred -> {_built} built until the main menu");
         }
+
+        private static HarmonyMethod Hook(string name) => new HarmonyMethod(AccessTools.Method(typeof(HarmonyBatcher), name), Priority.First);
 
         private static void PatchAllPrefix() => _depth++;
 
         private static Exception PatchAllFinalizer(Exception __exception)
         {
-            if (--_depth > 0)
-            {
-                return __exception;
-            }
+            if (--_depth > 0) return __exception;
             Exception buildError = Flush();
             return __exception ?? buildError;
         }
 
         private static bool UpdateWrapperPrefix(MethodBase original, ref MethodInfo __result)
         {
-            if (_depth == 0 || _flushing || original == null)
-            {
-                return true;
-            }
+            if (_depth == 0 || _flushing || original == null) return true;
             if (_pending == null)
             {
                 _pending = new List<MethodBase>();
@@ -111,14 +97,11 @@ namespace Morgott.Preloader.HarmonyBatch
             return false;
         }
 
-        /// <summary>Builds every recorded method once, in the order they were first patched. A failing build does not
-        /// stop the others; the first failure is rethrown from PatchAll, where the immediate build would have thrown.</summary>
+        /// <summary>Builds every recorded method once, in first-patched order. A failing build does not stop the others;
+        /// the first failure is rethrown from PatchAll, where the immediate build would have thrown.</summary>
         private static Exception Flush()
         {
-            if (_pending == null || _pending.Count == 0)
-            {
-                return null;
-            }
+            if (_pending == null || _pending.Count == 0) return null;
             MethodBase[] methods = _pending.ToArray();
             MethodBase[] pinned = _pinned.ToArray();
             _pending.Clear();
@@ -135,8 +118,7 @@ namespace Morgott.Preloader.HarmonyBatch
                     {
                         try
                         {
-                            MethodInfo replacement = _updateWrapper(method, method.ToPatchInfo());
-                            _addReplacementOriginal(method, replacement);
+                            _addReplacementOriginal(method, _updateWrapper(method, method.ToPatchInfo()));
                             _built++;
                         }
                         catch (Exception e)
@@ -151,10 +133,7 @@ namespace Morgott.Preloader.HarmonyBatch
             {
                 _flushing = false;
                 // Release only our own pin; the detour built above holds its own.
-                foreach (MethodBase method in pinned)
-                {
-                    method.Unpin();
-                }
+                foreach (MethodBase method in pinned) method.Unpin();
             }
             return first;
         }

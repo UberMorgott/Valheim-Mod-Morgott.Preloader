@@ -4,13 +4,11 @@ using HarmonyLib;
 namespace Morgott.Preloader.WorldGen
 {
     /// <summary>
-    /// <c>ZoneSystem.Update</c> (ValheimDecompiled-1.0.16 ZoneSystem.cs:1149-1159) sets
-    /// <c>m_timeSlicedGenerationTimeBudget</c> every frame while the server has not generated its locations: a
-    /// frame-rate budget during the intro text / cinematic, 0.1 s otherwise. The location coroutine (:1730, :1904, :1937)
-    /// yields once a slice exceeds it. A postfix raises the 0.1 s case to the configured budget; the intro/cinematic case
-    /// and every other frame keep vanilla's value (the vanilla value of the last raised frame is put back once the branch
-    /// is left). Placement does not depend on where the coroutine yields: the generation RNG state is swapped in and out
-    /// around every yield (:1906-1911) and each location type reseeds (:1876). Only this field is touched.
+    /// <c>ZoneSystem.Update</c> (ValheimDecompiled-1.0.16 ZoneSystem.cs:1149-1159) sets <c>m_timeSlicedGenerationTimeBudget</c>
+    /// every frame while the server has not generated its locations: a frame-rate budget during the intro / cinematic,
+    /// 0.1 s otherwise; the location coroutine yields once a slice exceeds it. A postfix raises the 0.1 s case to the
+    /// configured budget and puts vanilla's value back once that branch is left. Placement does not depend on where the
+    /// coroutine yields: the generation RNG state is swapped around every yield (:1906-1911) and each type reseeds (:1876).
     /// </summary>
     internal static class LoadingTimeBudget
     {
@@ -41,20 +39,14 @@ namespace Morgott.Preloader.WorldGen
             ref float budget = ref _budget(__instance);
             if (vanillaBranch)
             {
-                if (budget != _value)
-                {
-                    _vanilla = budget;
-                }
+                if (budget != _value) _vanilla = budget;
                 budget = _value;
                 _raised = true;
             }
             else if (_raised)
             {
                 _raised = false;
-                if (__instance.LocationsGenerated && budget == _value)
-                {
-                    budget = _vanilla;
-                }
+                if (__instance.LocationsGenerated && budget == _value) budget = _vanilla;
             }
         }
     }
