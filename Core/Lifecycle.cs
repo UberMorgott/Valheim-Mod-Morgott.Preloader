@@ -7,11 +7,10 @@ using HarmonyLib;
 namespace Morgott.Preloader.Core
 {
     /// <summary>
-    /// Startup milestones for modules that do not depend on the profiler. <see cref="ChainloaderInitialized"/> =
-    /// end of <c>Chainloader.Initialize</c> (Unity is up, game assemblies resolvable, no plugin loaded yet);
-    /// <see cref="ChainloaderStarted"/> = end of <c>Chainloader.Start</c> (every plugin's Awake has run);
-    /// <see cref="MenuReady"/> = end of the first <c>FejdStartup.Start</c> (FejdStartup.cs:427, builds the main menu).
-    /// All are raised on the Unity main thread.
+    /// Startup milestones, raised on the Unity main thread: <see cref="ChainloaderInitialized"/> = end of
+    /// <c>Chainloader.Initialize</c> (Unity up, game assemblies resolvable, no plugin loaded); <see cref="ChainloaderStarted"/>
+    /// = end of <c>Chainloader.Start</c> (every plugin Awake ran); <see cref="MenuReady"/> = end of the first
+    /// <c>FejdStartup.Start</c> (FejdStartup.cs:427, builds the main menu).
     /// </summary>
     internal static class Lifecycle
     {
@@ -28,36 +27,31 @@ namespace Morgott.Preloader.Core
         public static void Install(Harmony harmony)
         {
             _harmony = harmony;
-            harmony.Patch(AccessTools.Method(typeof(Chainloader), nameof(Chainloader.Initialize)),
-                postfix: new HarmonyMethod(AccessTools.Method(typeof(Lifecycle), nameof(InitializePostfix))));
+            harmony.Patch(AccessTools.Method(typeof(Chainloader), nameof(Chainloader.Initialize)), postfix: Hook(nameof(InitializePostfix)));
         }
+
+        private static HarmonyMethod Hook(string name, int priority = -1) =>
+            new HarmonyMethod(AccessTools.Method(typeof(Lifecycle), name), priority);
 
         private static void InitializePostfix()
         {
+            // Finalizer, Priority.Last: after the other Chainloader.Start postfixes/finalizers, also when it throws.
             Log.Guard("Chainloader.Start hook", () => _harmony.Patch(AccessTools.Method(typeof(Chainloader), nameof(Chainloader.Start)),
-                finalizer: new HarmonyMethod(AccessTools.Method(typeof(Lifecycle), nameof(StartFinalizer)), Priority.Last)));
+                finalizer: Hook(nameof(StartFinalizer), Priority.Last)));
             Log.Guard("FejdStartup.Start hook", () => _harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "Start"),
-                postfix: new HarmonyMethod(AccessTools.Method(typeof(Lifecycle), nameof(FejdStartupPostfix)))));
+                postfix: Hook(nameof(FejdStartupPostfix))));
             Log.Guard("World load timing hooks", InstallWorldLoadTiming);
             Log.Guard("ChainloaderInitialized handlers", () => ChainloaderInitialized?.Invoke());
         }
 
-        // Finalizer, Priority.Last: after the other Chainloader.Start postfixes/finalizers, also when it throws.
-        private static void StartFinalizer()
-        {
-            Log.Guard("ChainloaderStarted handlers", () => ChainloaderStarted?.Invoke());
-        }
+        private static void StartFinalizer() => Log.Guard("ChainloaderStarted handlers", () => ChainloaderStarted?.Invoke());
 
         private static void FejdStartupPostfix()
         {
-            if (_menuReady)
-            {
-                return;
-            }
+            if (_menuReady) return;
             _menuReady = true;
-            Log.Guard("Menu ready time", () =>
-                Log.Info(string.Format(CultureInfo.InvariantCulture, "menu ready {0:F2} s after process start",
-                    (DateTime.Now - Process.GetCurrentProcess().StartTime).TotalSeconds)));
+            Log.Guard("Menu ready time", () => Log.Info(string.Format(CultureInfo.InvariantCulture, "menu ready {0:F2} s after process start",
+                (DateTime.Now - Process.GetCurrentProcess().StartTime).TotalSeconds)));
             Log.Guard("MenuReady handlers", () => MenuReady?.Invoke());
         }
 
@@ -72,45 +66,32 @@ namespace Morgott.Preloader.Core
 
         private static void InstallWorldLoadTiming()
         {
-            _harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "OnWorldStart"),
-                prefix: new HarmonyMethod(AccessTools.Method(typeof(Lifecycle), nameof(OnWorldStartPrefix)), Priority.First));
-            _harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "LoadMainScene"),
-                finalizer: new HarmonyMethod(AccessTools.Method(typeof(Lifecycle), nameof(LoadMainSceneFinalizer)), Priority.Last));
-            _harmony.Patch(AccessTools.DeclaredMethod(typeof(Game), "SpawnPlayer"),
-                finalizer: new HarmonyMethod(AccessTools.Method(typeof(Lifecycle), nameof(SpawnPlayerFinalizer)), Priority.Last));
+            _harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "OnWorldStart"), prefix: Hook(nameof(OnWorldStartPrefix), Priority.First));
+            _harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "LoadMainScene"), finalizer: Hook(nameof(LoadMainSceneFinalizer), Priority.Last));
+            _harmony.Patch(AccessTools.DeclaredMethod(typeof(Game), "SpawnPlayer"), finalizer: Hook(nameof(SpawnPlayerFinalizer), Priority.Last));
             UnityEngine.SceneManagement.SceneManager.sceneLoaded += (scene, mode) =>
             {
-                if (_awaitMain)
-                {
-                    _awaitMain = false;
-                    _mainLoaded = Stopwatch.GetTimestamp();
-                }
+                if (!_awaitMain) return;
+                _awaitMain = false;
+                _mainLoaded = Stopwatch.GetTimestamp();
             };
         }
 
         private static void OnWorldStartPrefix()
         {
-            if (_loadMainEnd == 0)
-            {
-                _click = Stopwatch.GetTimestamp();
-            }
+            if (_loadMainEnd == 0) _click = Stopwatch.GetTimestamp();
         }
 
         private static void LoadMainSceneFinalizer()
         {
-            if (_loadMainEnd == 0)
-            {
-                _loadMainEnd = Stopwatch.GetTimestamp();
-                _awaitMain = true;
-            }
+            if (_loadMainEnd != 0) return;
+            _loadMainEnd = Stopwatch.GetTimestamp();
+            _awaitMain = true;
         }
 
         private static void SpawnPlayerFinalizer(Exception __exception)
         {
-            if (_spawned || __exception != null || _loadMainEnd == 0)
-            {
-                return;
-            }
+            if (_spawned || __exception != null || _loadMainEnd == 0) return;
             _spawned = true;
             long now = Stopwatch.GetTimestamp();
             long click = _click != 0 ? _click : _loadMainEnd;

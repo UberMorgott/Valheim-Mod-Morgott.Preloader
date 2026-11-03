@@ -8,22 +8,18 @@ using UnityEngine;
 namespace Morgott.Preloader.Translations
 {
     /// <summary>
-    /// Vanilla <c>Localization.LoadCSV(TextAsset, language)</c> (assembly_guiutils Localization.cs:525-565) reads
-    /// <c>file.text</c>, splits the whole CSV and calls <c>AddWord(key, text)</c> (:481) per row; <c>SetupLanguage</c>
-    /// (:506) runs it for all 13 vanilla files, 8 times during startup here (English + the user language, again on
-    /// every mod's re-setup). The rows only depend on the TextAsset content (immutable) and the language, so the first
-    /// run of each (TextAsset instance, language) records the <c>AddWord</c> calls it makes and later runs replay them
-    /// through the real <c>AddWord</c> instead of parsing again.
-    /// Semantics stay vanilla: the live <c>m_translations</c> is filled by the same AddWord sequence (overlay order,
-    /// <c>Clear()</c> on language switch and other mods' AddWord patches all behave as before), LoadCSV returns true as
-    /// the original did, and every other mod's LoadCSV prefix/postfix still runs (Harmony runs postfixes when a prefix
-    /// skips the original). Nothing is written to disk. Caching is bypassed while any mod transpiles LoadCSV or patches
-    /// the parser helpers it would skip (DoQuoteLineSplit, StripCitations), or when another prefix already skipped it.
+    /// Vanilla <c>Localization.LoadCSV(TextAsset, language)</c> (assembly_guiutils Localization.cs:525-565) parses the
+    /// whole CSV and calls <c>AddWord(key, text)</c> per row, for all 13 vanilla files, 8 times during startup. The rows
+    /// depend only on the (immutable) TextAsset and the language, so the first run per (asset, language) records its
+    /// AddWord calls and later runs replay them through the real <c>AddWord</c>: same AddWord sequence, LoadCSV returns
+    /// true as the original did, other mods' prefixes/postfixes still run. In memory only. Bypassed while another mod
+    /// transpiles LoadCSV or patches the skipped parser helpers (DoQuoteLineSplit, StripCitations), or another prefix
+    /// already skipped the original.
     /// </summary>
     internal static class LocalizationCache
     {
-        private static readonly Dictionary<Key, KeyValuePair<string, string>[]> Rows = new Dictionary<Key, KeyValuePair<string, string>[]>();
-        private static readonly string[] OwnIds = { PreloaderPatcher.LocalizationHarmonyId, "morgott.valheim.preloader.profiler" };
+        private static readonly Dictionary<(int Asset, string Language), KeyValuePair<string, string>[]> Rows =
+            new Dictionary<(int, string), KeyValuePair<string, string>[]>();
 
         private static MethodInfo _loadCsv;
         private static MethodInfo[] _skippedHelpers;
@@ -33,19 +29,7 @@ namespace Morgott.Preloader.Translations
 
         /// <summary>AddWord calls of the LoadCSV run being recorded on this thread (null = not recording).</summary>
         [ThreadStatic] private static List<KeyValuePair<string, string>> _recording;
-        [ThreadStatic] private static Key _recordingKey;
-
-        private struct Key : IEquatable<Key>
-        {
-            public int Asset;
-            public string Language;
-
-            public bool Equals(Key other) => Asset == other.Asset && Language == other.Language;
-
-            public override bool Equals(object obj) => obj is Key other && Equals(other);
-
-            public override int GetHashCode() => Asset * 397 ^ (Language?.GetHashCode() ?? 0);
-        }
+        [ThreadStatic] private static (int, string) _recordingKey;
 
         /// <summary>After Chainloader.Initialize (touches assembly_guiutils types).</summary>
         public static void Install(Harmony harmony)
@@ -53,11 +37,7 @@ namespace Morgott.Preloader.Translations
             Type type = typeof(global::Localization);
             _loadCsv = AccessTools.DeclaredMethod(type, "LoadCSV", new[] { typeof(TextAsset), typeof(string) });
             MethodInfo addWord = AccessTools.DeclaredMethod(type, "AddWord", new[] { typeof(string), typeof(string) });
-            _skippedHelpers = new[]
-            {
-                AccessTools.DeclaredMethod(type, "DoQuoteLineSplit"),
-                AccessTools.DeclaredMethod(type, "StripCitations"),
-            };
+            _skippedHelpers = new[] { AccessTools.DeclaredMethod(type, "DoQuoteLineSplit"), AccessTools.DeclaredMethod(type, "StripCitations") };
             if (_loadCsv == null || addWord == null || Array.IndexOf(_skippedHelpers, null) >= 0)
             {
                 Log.Warning("LocalizationCache: Localization.LoadCSV/AddWord/DoQuoteLineSplit/StripCitations not found (game update?), module off");
@@ -76,16 +56,10 @@ namespace Morgott.Preloader.Translations
         private static bool LoadPrefix(global::Localization __instance, TextAsset file, string language, ref bool __result, bool __runOriginal)
         {
             _recording = null;
-            if (!__runOriginal || file == null || language == null || OthersChangeParsing())
-            {
-                return true;
-            }
-            var key = new Key { Asset = file.GetInstanceID(), Language = language };
+            if (!__runOriginal || file == null || language == null || OthersChangeParsing()) return true;
+            var key = (file.GetInstanceID(), language);
             KeyValuePair<string, string>[] rows;
-            lock (Rows)
-            {
-                Rows.TryGetValue(key, out rows);
-            }
+            lock (Rows) Rows.TryGetValue(key, out rows);
             if (rows == null)
             {
                 _misses++;
@@ -94,10 +68,7 @@ namespace Morgott.Preloader.Translations
                 return true;
             }
             _hits++;
-            foreach (KeyValuePair<string, string> row in rows)
-            {
-                _addWord(__instance, row.Key, row.Value);
-            }
+            foreach (KeyValuePair<string, string> row in rows) _addWord(__instance, row.Key, row.Value);
             __result = true;
             return false;
         }
@@ -110,45 +81,24 @@ namespace Morgott.Preloader.Translations
         {
             List<KeyValuePair<string, string>> recorded = _recording;
             _recording = null;
-            if (recorded != null && recorded.Count > 0 && __result && __runOriginal)
-            {
-                lock (Rows)
-                {
-                    Rows[_recordingKey] = recorded.ToArray();
-                }
-            }
+            if (recorded == null || recorded.Count == 0 || !__result || !__runOriginal) return;
+            lock (Rows) Rows[_recordingKey] = recorded.ToArray();
         }
 
         private static void LoadFinalizer() => _recording = null;
 
         private static bool OthersChangeParsing()
         {
-            Patches loadCsv = Harmony.GetPatchInfo(_loadCsv);
-            if (loadCsv != null && (Foreign(loadCsv.Transpilers) || Foreign(loadCsv.ILManipulators)))
+            if (PatchGuard.Foreign(_loadCsv, bodyOnly: true) != null)
             {
                 Log.WarningOnce("loc-bypass-transpiler", "LocalizationCache: another mod transpiles Localization.LoadCSV, cache bypassed");
                 return true;
             }
             foreach (MethodInfo helper in _skippedHelpers)
             {
-                if (Harmony.GetPatchInfo(helper) is Patches p && (Foreign(p.Prefixes) || Foreign(p.Postfixes) || Foreign(p.Transpilers) ||
-                                                                  Foreign(p.Finalizers) || Foreign(p.ILManipulators)))
-                {
-                    Log.WarningOnce("loc-bypass-" + helper.Name, $"LocalizationCache: another mod patches Localization.{helper.Name}, cache bypassed");
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private static bool Foreign(IEnumerable<Patch> patches)
-        {
-            foreach (Patch patch in patches)
-            {
-                if (Array.IndexOf(OwnIds, patch.owner) < 0)
-                {
-                    return true;
-                }
+                if (PatchGuard.Foreign(helper) == null) continue;
+                Log.WarningOnce("loc-bypass-" + helper.Name, $"LocalizationCache: another mod patches Localization.{helper.Name}, cache bypassed");
+                return true;
             }
             return false;
         }
