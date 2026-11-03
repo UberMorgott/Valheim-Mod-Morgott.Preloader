@@ -25,8 +25,7 @@ namespace Morgott.Preloader.Profiling
         private static readonly List<TraceEvent> Pending = new List<TraceEvent>();
         private static Harmony _harmony;
         private static long _currentStart;
-        private static string _currentName;
-        private static string _currentGuid;
+        private static string _currentName, _currentGuid;
         private const string GuidSeparator = "] (";
 
         /// <summary>Raised at the end of Chainloader.Initialize: Unity is up, game assemblies are resolvable.</summary>
@@ -40,9 +39,10 @@ namespace Morgott.Preloader.Profiling
         {
             _harmony = harmony;
             harmony.Patch(AccessTools.Method(typeof(Chainloader), nameof(Chainloader.Initialize)),
-                prefix: new HarmonyMethod(AccessTools.Method(typeof(PluginLifecycleProfiler), nameof(InitPrefix)), Priority.First),
-                postfix: new HarmonyMethod(AccessTools.Method(typeof(PluginLifecycleProfiler), nameof(InitPostfix)), Priority.Last));
+                prefix: H(nameof(InitPrefix), Priority.First), postfix: H(nameof(InitPostfix), Priority.Last));
         }
+
+        private static HarmonyMethod H(string name, int priority) => new HarmonyMethod(AccessTools.Method(typeof(PluginLifecycleProfiler), name), priority);
 
         private static void InitPrefix(out long __state)
         {
@@ -55,8 +55,7 @@ namespace Morgott.Preloader.Profiling
             StartupTrace.Complete("lifecycle", "Chainloader.Initialize", __state, StartupTrace.Now());
             StartupTrace.Mark("Chainloader.Initialize end");
             Log.Guard("Chainloader.Start hook", () => _harmony.Patch(AccessTools.Method(typeof(Chainloader), nameof(Chainloader.Start)),
-                prefix: new HarmonyMethod(AccessTools.Method(typeof(PluginLifecycleProfiler), nameof(StartPrefix)), Priority.First),
-                finalizer: new HarmonyMethod(AccessTools.Method(typeof(PluginLifecycleProfiler), nameof(StartFinalizer)), Priority.Last)));
+                prefix: H(nameof(StartPrefix), Priority.First), finalizer: H(nameof(StartFinalizer), Priority.Last)));
             Log.Guard("ChainloaderInitialized handlers", () => ChainloaderInitialized?.Invoke());
         }
 
@@ -76,16 +75,10 @@ namespace Morgott.Preloader.Profiling
                 Logger.Listeners.Remove(Instance);
                 ClosePlugin(end);
                 var guids = new Dictionary<string, string>();
-                foreach (KeyValuePair<string, PluginInfo> kv in Chainloader.PluginInfos)
-                {
-                    guids[kv.Value.ToString()] = kv.Key;
-                }
+                foreach (KeyValuePair<string, PluginInfo> kv in Chainloader.PluginInfos) guids[kv.Value.ToString()] = kv.Key;
                 foreach (TraceEvent e in Pending)
                 {
-                    if (guids.TryGetValue(e.Detail, out string guid))
-                    {
-                        e.Name = guid;
-                    }
+                    if (guids.TryGetValue(e.Detail, out string guid)) e.Name = guid;
                     StartupTrace.Complete(e.Cat, e.Name, e.Start, e.End, e.Detail, e.Detail2);
                 }
                 Pending.Clear();
@@ -97,88 +90,59 @@ namespace Morgott.Preloader.Profiling
 
         private static void ClosePlugin(long end)
         {
-            if (_currentName != null)
+            if (_currentName == null) return;
+            Pending.Add(new TraceEvent
             {
-                Pending.Add(new TraceEvent
-                {
-                    Cat = "plugin",
-                    Name = _currentGuid ?? _currentName,
-                    Start = _currentStart,
-                    End = end,
-                    Detail = _currentName,
-                    Detail2 = "assembly load + static ctor + Awake",
-                });
-                _currentName = null;
-                _currentGuid = null;
-            }
+                Cat = "plugin",
+                Name = _currentGuid ?? _currentName,
+                Start = _currentStart,
+                End = end,
+                Detail = _currentName,
+                Detail2 = "assembly load + static ctor + Awake",
+            });
+            _currentName = _currentGuid = null;
         }
 
         public void LogEvent(object sender, LogEventArgs eventArgs)
         {
-            if (eventArgs.Source?.SourceName != "BepInEx" || !(eventArgs.Data is string text))
-            {
-                return;
-            }
+            if (eventArgs.Source?.SourceName != "BepInEx" || !(eventArgs.Data is string text)) return;
             if (IsCompleteMessage(text))
             {
                 // Logged before Chainloader.Start postfixes run: keeps a deferred Harmony flush out of the last plugin.
                 ClosePlugin(StartupTrace.Now());
                 return;
             }
-            if (!TryParseLoading(text, out string name, out string guid))
-            {
-                return;
-            }
+            if (!TryParseLoading(text, out string name, out string guid)) return;
             long now = StartupTrace.Now();
             ClosePlugin(now);
-            _currentName = name;
-            _currentGuid = guid;
-            _currentStart = now;
+            (_currentName, _currentGuid, _currentStart) = (name, guid, now);
         }
 
         // Pack 5.4.2350: "Chainloader startup complete"; 5.4.2351: "... complete (N loaded, N skipped, N failed)".
-        internal static bool IsCompleteMessage(string text)
-        {
-            return text == CompleteMessage
-                || (text.StartsWith(CompleteMessage + " (", StringComparison.Ordinal) && text.EndsWith(")", StringComparison.Ordinal));
-        }
+        internal static bool IsCompleteMessage(string text) =>
+            text == CompleteMessage || (text.StartsWith(CompleteMessage + " (", StringComparison.Ordinal) && text.EndsWith(")", StringComparison.Ordinal));
 
         // Pack 5.4.2350: "Loading [{PluginInfo}]"; 5.4.2351: "Loading [{PluginInfo}] ({GUID})" (Chainloader.Start).
         // GUID is null for the old format and resolved from Chainloader.PluginInfos at the end of Start.
         internal static bool TryParseLoading(string text, out string name, out string guid)
         {
-            name = null;
-            guid = null;
-            if (!text.StartsWith(LoadingPrefix, StringComparison.Ordinal))
-            {
-                return false;
-            }
+            name = guid = null;
+            if (!text.StartsWith(LoadingPrefix, StringComparison.Ordinal)) return false;
             if (text.EndsWith(")", StringComparison.Ordinal))
             {
                 int sep = text.LastIndexOf(GuidSeparator, StringComparison.Ordinal);
-                if (sep < LoadingPrefix.Length)
-                {
-                    return false;
-                }
+                if (sep < LoadingPrefix.Length) return false;
                 int guidStart = sep + GuidSeparator.Length;
                 guid = text.Substring(guidStart, text.Length - guidStart - 1);
                 name = text.Substring(LoadingPrefix.Length, sep - LoadingPrefix.Length);
-                if (guid.Length == 0)
-                {
-                    guid = null;
-                }
+                if (guid.Length == 0) guid = null;
                 return true;
             }
-            if (text.EndsWith("]", StringComparison.Ordinal))
-            {
-                name = text.Substring(LoadingPrefix.Length, text.Length - LoadingPrefix.Length - 1);
-                return true;
-            }
-            return false;
+            if (!text.EndsWith("]", StringComparison.Ordinal)) return false;
+            name = text.Substring(LoadingPrefix.Length, text.Length - LoadingPrefix.Length - 1);
+            return true;
         }
 
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }

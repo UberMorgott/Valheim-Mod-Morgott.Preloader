@@ -20,19 +20,13 @@ namespace Morgott.Preloader.Profiling
         /// <summary>Drops entries whose closing hook never ran (an exception skipped it).</summary>
         public void TruncateTo(int count)
         {
-            if (count >= 0 && count < _starts.Count)
-            {
-                _starts.RemoveRange(count, _starts.Count - count);
-            }
+            if (count >= 0 && count < _starts.Count) _starts.RemoveRange(count, _starts.Count - count);
         }
 
         public long Pop()
         {
             int last = _starts.Count - 1;
-            if (last < 0)
-            {
-                return 0;
-            }
+            if (last < 0) return 0;
             long start = _starts[last];
             _starts.RemoveAt(last);
             return start;

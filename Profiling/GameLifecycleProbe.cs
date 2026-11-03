@@ -34,17 +34,8 @@ namespace Morgott.Preloader.Profiling
         private static long _sceneRequest;
 
         // World-load wall clock (main thread only): click -> LoadMainScene -> main scene Awake block -> first frame.
-        private static long _click;
-        private static long _loadMainStart;
-        private static long _loadMainEnd;
-        private static long _menuFrame;
-        private static long _mainLoaded;
-        private static long _firstFrame;
-        private static long _zoneStart;
-        private static bool _awaitMainScene;
-        private static bool _worldLoadEmitted;
-        private static bool _menuReady;
-        private static bool _worldReady;
+        private static long _click, _loadMainStart, _loadMainEnd, _menuFrame, _mainLoaded, _firstFrame, _zoneStart;
+        private static bool _awaitMainScene, _worldLoadEmitted, _menuReady, _worldReady;
 
         /// <summary>Raised once, on the main thread, at the end of the first FejdStartup.Start.</summary>
         public static event Action MenuReady;
@@ -113,6 +104,7 @@ namespace Morgott.Preloader.Profiling
         public static void Install(Harmony harmony)
         {
             int hooked = 0;
+            HarmonyMethod H(string name, int priority) => new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), name), priority);
             foreach (MethodInfo method in Targets().Concat(WorldTargets()))
             {
                 if (method == null)
@@ -120,22 +112,14 @@ namespace Morgott.Preloader.Profiling
                     Log.Warning("Game probe: a target method was not found (game update?), skipped");
                     continue;
                 }
-                harmony.Patch(method,
-                    prefix: new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), nameof(OuterPrefix)), Priority.First),
-                    finalizer: new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), nameof(OuterFinalizer)), Priority.Last));
-                harmony.Patch(method,
-                    prefix: new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), nameof(BodyPrefix)), Priority.Last),
-                    postfix: new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), nameof(BodyPostfix)), Priority.First));
+                harmony.Patch(method, prefix: H(nameof(OuterPrefix), Priority.First), finalizer: H(nameof(OuterFinalizer), Priority.Last));
+                harmony.Patch(method, prefix: H(nameof(BodyPrefix), Priority.Last), postfix: H(nameof(BodyPostfix), Priority.First));
                 hooked++;
             }
 
             // SceneLoader.Start -> StartLoading -> LoadSceneAsync (SceneLoader.cs:74/118/123): the scene request.
             MethodInfo sceneLoaderStart = AccessTools.DeclaredMethod(typeof(SceneLoader), "Start");
-            if (sceneLoaderStart != null)
-            {
-                harmony.Patch(sceneLoaderStart,
-                    prefix: new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), nameof(SceneLoaderStartPrefix))));
-            }
+            if (sceneLoaderStart != null) harmony.Patch(sceneLoaderStart, prefix: new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), nameof(SceneLoaderStartPrefix))));
 
             SceneManager.sceneLoaded += OnSceneLoaded;
             SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -165,28 +149,23 @@ namespace Morgott.Preloader.Profiling
 
         private static void Finish(MethodBase original, string cat, long start, bool failed = false)
         {
-            if (start == 0)
-            {
-                return;
-            }
+            if (start == 0) return;
             long end = StartupTrace.Now();
             StartupTrace.Complete(cat, original.DeclaringType?.Name + "." + original.Name, start, end);
-            if (cat != "game")
-            {
-                return;
-            }
-            if (!_menuReady && original.DeclaringType == typeof(FejdStartup) && original.Name == "Start")
+            if (cat != "game") return;
+            bool Is(Type type, string name) => original.DeclaringType == type && original.Name == name;
+            if (!_menuReady && Is(typeof(FejdStartup), "Start"))
             {
                 _menuReady = true;
                 StartupTrace.Mark("main menu ready (FejdStartup.Start end)");
                 Log.Guard("MenuReady handlers", () => MenuReady?.Invoke());
             }
-            else if (original.DeclaringType == typeof(FejdStartup) && original.Name == "OnWorldStart")
+            else if (Is(typeof(FejdStartup), "OnWorldStart"))
             {
                 // OnWorldStart may return early (cloud warning, popups): the last one before LoadMainScene wins.
                 _click = start;
             }
-            else if (original.DeclaringType == typeof(FejdStartup) && original.Name == "LoadMainScene")
+            else if (Is(typeof(FejdStartup), "LoadMainScene"))
             {
                 StartupTrace.Mark(WorldLoadMark);
                 _sceneRequest = StartupTrace.Now();
@@ -195,13 +174,13 @@ namespace Morgott.Preloader.Profiling
                 _awaitMainScene = true;
                 StartEndOfFrame(FejdStartup.instance, MenuFrameRendered);
             }
-            else if (_zoneStart == 0 && _loadMainEnd != 0 && original.DeclaringType == typeof(ZoneSystem) && original.Name == "Start")
+            else if (_zoneStart == 0 && _loadMainEnd != 0 && Is(typeof(ZoneSystem), "Start"))
             {
                 _zoneStart = end;
                 StartupTrace.Mark(ZoneStartMark);
                 EmitWorldLoadSpans();
             }
-            else if (!_worldReady && !failed && original.DeclaringType == typeof(Game) && original.Name == "SpawnPlayer")
+            else if (!_worldReady && !failed && Is(typeof(Game), "SpawnPlayer"))
             {
                 _worldReady = true;
                 StartupTrace.Mark(WorldReadyMark);
@@ -217,10 +196,7 @@ namespace Morgott.Preloader.Profiling
 
         private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            if (!StartupTrace.Recording)
-            {
-                return;
-            }
+            if (!StartupTrace.Recording) return;
             StartupTrace.Mark("scene loaded: " + scene.name, mode.ToString());
             if (_awaitMainScene)
             {
@@ -259,11 +235,9 @@ namespace Morgott.Preloader.Profiling
 
         private static void MenuFrameRendered()
         {
-            if (_mainLoaded == 0)
-            {
-                _menuFrame = StartupTrace.Now();
-                StartupTrace.Mark("menu frame rendered after LoadMainScene (menu loading panel)");
-            }
+            if (_mainLoaded != 0) return;
+            _menuFrame = StartupTrace.Now();
+            StartupTrace.Mark("menu frame rendered after LoadMainScene (menu loading panel)");
         }
 
         private static void FirstFrameRendered()
@@ -277,18 +251,12 @@ namespace Morgott.Preloader.Profiling
         /// rendered frame and ZoneSystem.Start are known.</summary>
         private static void EmitWorldLoadSpans()
         {
-            if (_worldLoadEmitted || _firstFrame == 0 || _zoneStart == 0)
-            {
-                return;
-            }
+            if (_worldLoadEmitted || _firstFrame == 0 || _zoneStart == 0) return;
             _worldLoadEmitted = true;
             long click = _click != 0 && _click <= _loadMainStart ? _click : _loadMainStart;
             Span("1 click (OnWorldStart start) -> LoadMainScene end", click, _loadMainEnd,
                 "menu side: OnWorldStart, backend selection, LoadMainScene");
-            if (_menuFrame != 0)
-            {
-                Span("2a LoadMainScene end -> menu frame rendered", _loadMainEnd, _menuFrame, "the menu's loading panel can be seen");
-            }
+            if (_menuFrame != 0) Span("2a LoadMainScene end -> menu frame rendered", _loadMainEnd, _menuFrame, "the menu's loading panel can be seen");
             Span("2 LoadMainScene end -> main scene loaded (FREEZE: old scene unload + every main-scene Awake)", _loadMainEnd, _mainLoaded,
                 "sync SceneManager.LoadScene; nothing is rendered during it");
             Span("3 main scene loaded -> first rendered frame (Start calls + first Update)", _mainLoaded, _firstFrame, null);
@@ -298,18 +266,12 @@ namespace Morgott.Preloader.Profiling
 
         private static void Span(string name, long start, long end, string detail)
         {
-            if (start != 0 && end >= start)
-            {
-                StartupTrace.Complete("worldload", name, start, end, detail, tid: StartupTrace.LaneWorldLoad);
-            }
+            if (start != 0 && end >= start) StartupTrace.Complete("worldload", name, start, end, detail, tid: StartupTrace.LaneWorldLoad);
         }
 
         private static void OnActiveSceneChanged(Scene from, Scene to)
         {
-            if (StartupTrace.Recording)
-            {
-                StartupTrace.Mark("active scene: " + to.name);
-            }
+            if (StartupTrace.Recording) StartupTrace.Mark("active scene: " + to.name);
         }
     }
 }
