@@ -8,7 +8,7 @@
     <AssemblyName>Morgott.Preloader</AssemblyName>
     <RootNamespace>Morgott.Preloader</RootNamespace>
     <Product>Morgott.Preloader</Product>
-    <Version>0.9.3</Version>
+    <Version>0.10.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <NoWarn>$(NoWarn);MSB3277</NoWarn>

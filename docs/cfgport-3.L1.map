@@ -1,0 +1,11 @@
+# TASKS 3.L1: FastStartup -> Morgott.Preloader (same sections and keys; [Profiler] TimeSpawnWindow + TimeUnityMessages removed)
+FastStartup.cfg|BundleCache -> morgott.valheim.preloader.cfg|BundleCache
+FastStartup.cfg|ConfigSaveBatcher -> morgott.valheim.preloader.cfg|ConfigSaveBatcher
+FastStartup.cfg|Diagnostics -> morgott.valheim.preloader.cfg|Diagnostics
+FastStartup.cfg|HarmonyBatching -> morgott.valheim.preloader.cfg|HarmonyBatching
+FastStartup.cfg|LocalizationCache -> morgott.valheim.preloader.cfg|LocalizationCache
+FastStartup.cfg|ModHotspots -> morgott.valheim.preloader.cfg|ModHotspots
+FastStartup.cfg|Profiler -> morgott.valheim.preloader.cfg|Profiler
+FastStartup.cfg|WorldGen -> morgott.valheim.preloader.cfg|WorldGen
+FastStartup.cfg|Profiler|TimeSpawnWindow -> -
+FastStartup.cfg|Profiler|TimeUnityMessages -> -
