@@ -56,15 +56,6 @@ namespace Morgott.Preloader.Profiling
         {
             Log.Guard("Bundle profiler install", () => BundleProfiler.Install(_harmony));
             Log.Guard("Game probe install", () => GameLifecycleProbe.Install(_harmony));
-            if (Config.ProfilerTimeSpawnWindow.Value)
-            {
-                Log.Guard("Spawn window probe install", () => SpawnWindowProbe.Install(_harmony));
-                Log.Guard("Frame probe install", FrameProbe.Install);
-            }
-            if (Config.ProfilerTimeUnityMessages.Value)
-            {
-                Log.Guard("Unity message probe install", () => UnityMessageProbe.Install(_harmony));
-            }
             GameLifecycleProbe.MenuReady += OnMenuReady;
             GameLifecycleProbe.WorldReady += OnWorldReady;
             Application.quitting += OnQuitting;

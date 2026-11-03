@@ -23,7 +23,6 @@ namespace Morgott.Preloader.BundleCache
     /// after the main menu, copied off the main thread and recompressed with
     /// <c>AssetBundle.RecompressAssetBundleAsync(.., BuildCompression.LZ4Runtime, .., ThreadPriority.Low)</c>
     /// (AssetBundleModule line 925, CoreModule BuildCompression), one bundle at a time. Any failure = original load.
-    /// Verified copies shipped in the modpack (<see cref="PackCache"/>) are tried before the local cache.
     /// </summary>
     internal static class BundleCacheModule
     {
@@ -34,7 +33,6 @@ namespace Morgott.Preloader.BundleCache
         private static readonly Dictionary<string, ResourceSource> Parked = new Dictionary<string, ResourceSource>(StringComparer.OrdinalIgnoreCase);
         private static Harmony _harmony;
         private static CacheStore _store;
-        private static PackCache _pack;
         private static volatile bool _active;
         private static SynchronizationContext _main;
         private static HashSet<Guid> _loadedMvids;
@@ -46,7 +44,6 @@ namespace Morgott.Preloader.BundleCache
         private static readonly Stopwatch PopulateTime = new Stopwatch();
 
         private static int _hits;
-        private static int _packHits;
         private static long _hitBytes;
         private static int _misses;
         private static int _alreadyFast;
@@ -74,21 +71,16 @@ namespace Morgott.Preloader.BundleCache
                 Log.Warning("BundleCache: Mono resource stream internals not found (runtime changed?), cache disabled");
                 return;
             }
-            // Everything Morgott.Preloader writes stays under BepInEx\Morgott.Preloader in the game folder (owner rule: no caches
-            // in AppData/LocalLow/%TEMP%), so deleting that folder removes it all.
-            string root = Path.GetFullPath(Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader"));
             _store = new CacheStore(CacheRoot, Application.unityVersion);
             if (EagerBuilder.Started && !EagerBuilder.Matches(_store.Dir))
             {
                 Log.Warning($"BundleCache: the eager build guessed another cache directory than Unity's {_store.Dir}; its copies are not used");
                 _eagerOff = true;
             }
-            // Modpack-shipped copies (read-only, same key and version folder): BepInEx\Morgott.Preloader\pack\bundles\v1-<Unity>.
-            _pack = PackCache.Open(Path.Combine(root, Path.Combine("pack", Path.Combine("bundles", Path.GetFileName(_store.Dir)))), _store.Dir);
             Hook("LoadFromStreamInternal", nameof(StreamPrefix));
             Hook("LoadFromStreamAsyncInternal", nameof(StreamAsyncPrefix));
             _active = true;
-            Log.Info($"BundleCache: active, cache {_store.Dir}" + (_pack == null ? ", no pack cache" : $", pack cache {_pack.Dir} ({_pack.Count} copies)"));
+            Log.Info($"BundleCache: active, cache {_store.Dir}");
         }
 
         private static void Hook(string target, string prefix)
@@ -172,19 +164,13 @@ namespace Morgott.Preloader.BundleCache
             return false;
         }
 
-        /// <summary>A served copy that Unity could not load: never served again (local copy deleted, pack copy
-        /// rejected for this session) and, for a local copy, queued for a rebuild from the original.</summary>
+        /// <summary>A served copy that Unity could not load: never served again (local copy deleted) and queued for a rebuild from the original.</summary>
         private static void Invalidate(Hit hit, string error, bool fallback)
         {
             _hitFailures++;
             Log.WarningOnce(LogKey + "hitFailed." + hit.Source.FileName,
                 $"BundleCache: cached copy of {hit.Source.Label} ({Path.GetFileName(hit.Path)}) did not load ({error}), " +
                 (fallback ? "loading the original instead" : "the original is loaded from the next launch on") + "; copy invalidated");
-            if (hit.FromPack)
-            {
-                _pack.Reject(hit.Source.FileName);
-                return;
-            }
             EagerBuilder.Release(hit.Source.FileName);
             TryDelete(hit.Path);
             lock (Pending)
@@ -198,7 +184,6 @@ namespace Morgott.Preloader.BundleCache
         private sealed class Hit
         {
             public string Path;
-            public bool FromPack;
             public ResourceSource Source;
         }
 
@@ -218,14 +203,6 @@ namespace Morgott.Preloader.BundleCache
                     Log.InfoOnce(LogKey + "type." + stream?.GetType().FullName,
                         $"BundleCache: {stream?.GetType().FullName ?? "null"} stream is not an embedded resource, loaded uncached");
                     return null;
-                }
-                string packed = _pack?.Find(source, stream);
-                if (packed != null)
-                {
-                    _store.MarkPackServed(source.FileName);
-                    _packHits++;
-                    _hitBytes += source.Length;
-                    return new Hit { Path = packed, FromPack = true, Source = source };
                 }
                 string path = _store.PathOf(source);
                 if (File.Exists(path))
@@ -315,7 +292,7 @@ namespace Morgott.Preloader.BundleCache
             {
                 return;
             }
-            Log.Info($"BundleCache: {_packHits} pack hits + {_hits} local hits ({_hitBytes / (1024.0 * 1024.0):F1} MB served from LZ4 copies), {_misses} LZMA misses queued, " +
+            Log.Info($"BundleCache: {_hits} hits ({_hitBytes / (1024.0 * 1024.0):F1} MB served from LZ4 copies), {_misses} LZMA misses queued, " +
                      $"{_alreadyFast} already LZ4/uncompressed, {_passedThrough} not cacheable, {_hitFailures} copies failed to load (originals used)");
             if (EagerBuilder.Started && !_eagerOff)
             {

@@ -36,9 +36,6 @@ namespace Morgott.Preloader.Profiling
         private static readonly Dictionary<MethodBase, (string Owner, string Target)> Owners =
             new Dictionary<MethodBase, (string, string)>();
 
-        /// <summary>"Type.Method" of the <see cref="SpawnWindowProbe"/> targets (filled on the main thread before any wrap).</summary>
-        private static readonly HashSet<string> SpawnWindowTargets = new HashSet<string>();
-
         [ThreadStatic] private static SpanStack _spans;
 
         private static string Dir => Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader");
@@ -63,13 +60,6 @@ namespace Morgott.Preloader.Profiling
             if (ResolveCache == null)
             {
                 Log.Warning("Patch owner probe: MonoMod.Utils has no ReflectionHelper.ResolveReflectionCache (other version), mod patch methods are not timed");
-            }
-            if (SpawnWindowProbe.Installed)
-            {
-                foreach (MethodInfo target in SpawnWindowProbe.Targets().Where(SpawnWindowProbe.IsTarget))
-                {
-                    SpawnWindowTargets.Add(target.DeclaringType?.Name + "." + target.Name);
-                }
             }
             _harmony = harmony;
             _pendingPath = pendingPath;
@@ -96,10 +86,6 @@ namespace Morgott.Preloader.Profiling
             HashSet<string> skip = _skip;
             int wrapped = 0;
             IEnumerable<MethodInfo> targets = GameLifecycleProbe.Targets().Concat(GameLifecycleProbe.WorldTargets());
-            if (SpawnWindowProbe.Installed)
-            {
-                targets = targets.Concat(SpawnWindowProbe.Targets());
-            }
             foreach (MethodInfo target in targets.Where(m => m != null))
             {
                 Patches info = Harmony.GetPatchInfo(target);
@@ -252,12 +238,6 @@ namespace Morgott.Preloader.Profiling
             long start = _spans?.Pop() ?? 0;
             if (start == 0 || !Owners.TryGetValue(__originalMethod, out (string Owner, string Target) info))
             {
-                return;
-            }
-            if (SpawnWindowTargets.Contains(info.Target))
-            {
-                // Per-frame spawn-window methods: aggregated per owner, never one event per call.
-                SpawnWindowProbe.AddPatch(info.Owner, HarmonyProfiler.Describe(__originalMethod), info.Target, start, StartupTrace.Now());
                 return;
             }
             StartupTrace.Complete("game.patch", info.Owner, start, StartupTrace.Now(), HarmonyProfiler.Describe(__originalMethod), info.Target);

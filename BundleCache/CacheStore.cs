@@ -26,7 +26,6 @@ namespace Morgott.Preloader.BundleCache
         private readonly string _root;
         private readonly object _lock = new object();
         private readonly HashSet<string> _usedThisSession = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _packServed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, IndexEntry> _index;
 
         /// <summary>Suffix of Unity's LZ4 recompression of an eagerly built (uncompressed) copy, promoted over it at the next launch.</summary>
@@ -61,15 +60,6 @@ namespace Morgott.Preloader.BundleCache
             }
         }
 
-        /// <summary>A key served from the modpack's copy in this session: its local copy (if any) is a duplicate.</summary>
-        public void MarkPackServed(string fileName)
-        {
-            lock (_lock)
-            {
-                _packServed.Add(fileName);
-            }
-        }
-
         /// <summary>Records a new copy and persists the index right away (called after the rename into place).</summary>
         public void Add(string fileName, string label)
         {
@@ -84,10 +74,8 @@ namespace Morgott.Preloader.BundleCache
 
         /// <summary>
         /// Background maintenance after the main menu: removes dead temps, copies for other Unity/format versions,
-        /// copies whose assembly (MVID) is no longer loaded, local duplicates of copies the modpack served this
-        /// session, then evicts least recently used copies beyond <paramref name="capBytes"/>. Copies used (loaded)
-        /// in this session are never deleted, and the modpack's own copies live elsewhere (read-only, see
-        /// <see cref="PackCache"/>). Returns the resulting cache size.
+        /// copies whose assembly (MVID) is no longer loaded, then evicts least recently used copies beyond <paramref name="capBytes"/>. Copies used (loaded)
+        /// in this session are never deleted. Returns the resulting cache size.
         /// </summary>
         public long Maintain(ICollection<Guid> loadedMvids, long capBytes, out int deleted)
         {
@@ -101,7 +89,7 @@ namespace Morgott.Preloader.BundleCache
                 foreach (FileInfo file in new DirectoryInfo(Dir).GetFiles("*" + BundleExtension))
                 {
                     bool used = _usedThisSession.Contains(file.Name);
-                    if (!used && (!TryParseMvid(file.Name, out Guid mvid) || !loadedMvids.Contains(mvid) || _packServed.Contains(file.Name)))
+                    if (!used && (!TryParseMvid(file.Name, out Guid mvid) || !loadedMvids.Contains(mvid)))
                     {
                         if (TryDelete(file.FullName))
                         {

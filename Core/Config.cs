@@ -31,8 +31,6 @@ namespace Morgott.Preloader.Core
 
         public static ConfigEntry<bool> VneiIndexingEnabled { get; private set; }
 
-        public static ConfigEntry<bool> ProfilerTimeSpawnWindow { get; private set; }
-
         public static ConfigEntry<bool> ParallelBiomeData { get; private set; }
 
         public static ConfigEntry<bool> EarlyReject { get; private set; }
@@ -52,8 +50,6 @@ namespace Morgott.Preloader.Core
         public static ConfigEntry<bool> ParallelMinimap { get; private set; }
 
         public static ConfigEntry<bool> ClientMinimapCache { get; private set; }
-
-        public static ConfigEntry<bool> ProfilerTimeUnityMessages { get; private set; }
 
         public static ConfigEntry<bool> SpikeProbe { get; private set; }
 
@@ -79,11 +75,10 @@ namespace Morgott.Preloader.Core
             BundleCacheEnabled = file.Bind("BundleCache", "Enabled", true,
                 "Serve LZMA asset bundles that mods embed in their DLLs from an LZ4 copy cached under " +
                 "BepInEx\\Morgott.Preloader\\cache\\bundles (game folder). Copies are made in the background after the main menu; " +
-                "the first launch loads the originals. Verified prebuilt copies shipped by the modpack in " +
-                "BepInEx\\Morgott.Preloader\\pack\\bundles are used first. Read once at launch.");
+                "the first launch loads the originals. Read once at launch.");
             BundleCacheMaxSizeMB = file.Bind("BundleCache", "MaxCacheSizeMB", 2048,
                 new ConfigDescription("Local cache size cap. Least recently used copies beyond it are deleted after the main menu " +
-                                      "(copies loaded in the current session are kept; the modpack's copies are never touched).",
+                                      "(copies loaded in the current session are kept).",
                     new AcceptableValueRange<int>(64, 65536)));
             BundleCacheEagerFirstBuild = file.Bind("BundleCache", "EagerFirstBuild", true,
                 "From the preloader on, convert mods' LZMA bundles that have no cached copy yet on a few background threads " +
@@ -115,10 +110,6 @@ namespace Morgott.Preloader.Core
             DumpModHotspots = file.Bind("Diagnostics", "DumpModHotspots", false,
                 "At the main menu write the state the ModHotspots replacements produce (e.g. every ShaderReplacer material " +
                 "and its shader) to BepInEx\\Morgott.Preloader\\modhotspots-state.txt, for diffing a toggle off against on.");
-            ProfilerTimeSpawnWindow = file.Bind("Profiler", "TimeSpawnWindow", false,
-                "With [Profiler] Enabled: also time the per-frame world-load methods between the main scene request and the first " +
-                "player spawn (zone creation, object creation, terrain readiness, spawn point search, teleport) as count / total / " +
-                "max per method (and per mod patch with TimeModPatches). Off after the first spawn. Read once at launch.");
             ParallelBiomeData = file.Bind("WorldGen", "ParallelBiomeData", true,
                 "Compute the 2048x2048 biome/height map built on every world load and connect (AltBiomeWorldData." +
                 "GenerateBiomePoints) on all CPU cores, same per-cell formula, identical result. Falls back to vanilla while another " +
@@ -161,10 +152,6 @@ namespace Morgott.Preloader.Core
                 "(vanilla file format; vanilla caches them only for worlds hosted locally) and load them on the next join instead of " +
                 "generating again. Keyed by world seed, world generator version, game / data versions and the minimap settings; " +
                 "the newest 8 worlds are kept; off while another mod patches the world generator. Read once at launch.");
-            ProfilerTimeUnityMessages = file.Bind("Profiler", "TimeUnityMessages", false,
-                "With [Profiler] Enabled: time every Awake/Start of the game's MonoBehaviours during the world load, per method and " +
-                "load phase (freeze, scene loaded -> first frame, first frame -> spawn). Adds overhead to every object created " +
-                "before the spawn, so the spawn-window numbers are inflated while it is on. Read once at launch.");
             SpikeProbe = file.Bind("Profiler", "SpikeProbe", false,
                 "Record in-play frame times and, for every frame over SpikeThresholdMs, what ran in it: time per Unity player-loop " +
                 "subsystem, object creation / zone / location / dungeon room / terrain / asset bundle / texture upload calls, GC " +

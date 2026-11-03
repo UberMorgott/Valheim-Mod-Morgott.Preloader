@@ -110,20 +110,6 @@ namespace Morgott.Preloader.Profiling
             AccessTools.DeclaredMethod(typeof(ZDOMan), nameof(ZDOMan.LoadChunks)),                               // ZDOMan.cs:463
         };
 
-        /// <summary>World-load phase on the main thread: 0 before the main scene request, 1 = freeze (LoadMainScene end ->
-        /// main scene loaded), 2 = main scene loaded -> first rendered frame, 3 = first frame -> first spawn, 4 = after.</summary>
-        public static int WorldPhase { get; private set; }
-
-        public static readonly string[] WorldPhaseNames =
-        {
-            "before the main scene request", "freeze (LoadMainScene end -> main scene loaded)",
-            "main scene loaded -> first rendered frame", "first rendered frame -> first spawn", "after the first spawn",
-        };
-
-        /// <summary>Raised once, on the main thread, at the end of the OnWorldStart that leads to LoadMainScene (the click) or at
-        /// LoadMainScene end, whichever comes first.</summary>
-        public static event Action WorldLoadStarted;
-
         public static void Install(Harmony harmony)
         {
             int hooked = 0;
@@ -199,21 +185,14 @@ namespace Morgott.Preloader.Profiling
             {
                 // OnWorldStart may return early (cloud warning, popups): the last one before LoadMainScene wins.
                 _click = start;
-                RaiseWorldLoadStarted();
             }
             else if (original.DeclaringType == typeof(FejdStartup) && original.Name == "LoadMainScene")
             {
-                RaiseWorldLoadStarted();
-                if (WorldPhase == 0)
-                {
-                    WorldPhase = 1;
-                }
                 StartupTrace.Mark(WorldLoadMark);
                 _sceneRequest = StartupTrace.Now();
                 _loadMainStart = start;
                 _loadMainEnd = end;
                 _awaitMainScene = true;
-                SpawnWindowProbe.Open();
                 StartEndOfFrame(FejdStartup.instance, MenuFrameRendered);
             }
             else if (_zoneStart == 0 && _loadMainEnd != 0 && original.DeclaringType == typeof(ZoneSystem) && original.Name == "Start")
@@ -225,25 +204,9 @@ namespace Morgott.Preloader.Profiling
             else if (!_worldReady && !failed && original.DeclaringType == typeof(Game) && original.Name == "SpawnPlayer")
             {
                 _worldReady = true;
-                WorldPhase = 4;
-                Log.Guard("Spawn window close", SpawnWindowProbe.Close);
-                Log.Guard("Frame probe close", FrameProbe.Close);
-                Log.Guard("Unity message probe close", UnityMessageProbe.Close);
                 StartupTrace.Mark(WorldReadyMark);
                 Log.Guard("WorldReady handlers", () => WorldReady?.Invoke());
             }
-        }
-
-        private static bool _worldLoadStarted;
-
-        private static void RaiseWorldLoadStarted()
-        {
-            if (_worldLoadStarted)
-            {
-                return;
-            }
-            _worldLoadStarted = true;
-            Log.Guard("WorldLoadStarted handlers", () => WorldLoadStarted?.Invoke());
         }
 
         private static void SceneLoaderStartPrefix()
@@ -264,10 +227,6 @@ namespace Morgott.Preloader.Profiling
                 // Sync LoadScene: every Awake of the new scene ran before sceneLoaded; Start/Update/render follow.
                 _awaitMainScene = false;
                 _mainLoaded = StartupTrace.Now();
-                if (WorldPhase == 1)
-                {
-                    WorldPhase = 2;
-                }
                 StartupTrace.Mark(MainSceneLoadedMark, scene.name);
                 StartEndOfFrame((MonoBehaviour)Game.instance ?? ZNet.instance, FirstFrameRendered);
             }
@@ -310,10 +269,6 @@ namespace Morgott.Preloader.Profiling
         private static void FirstFrameRendered()
         {
             _firstFrame = StartupTrace.Now();
-            if (WorldPhase == 2)
-            {
-                WorldPhase = 3;
-            }
             StartupTrace.Mark(FirstFrameMark);
             EmitWorldLoadSpans();
         }

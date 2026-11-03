@@ -24,8 +24,6 @@ namespace Morgott.Preloader.Profiling
                 .Append(",\"args\":{\"name\":\"world load (wall clock)\"}},\n");
             sb.Append("{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":").Append(StartupTrace.LaneWorldGen)
                 .Append(",\"args\":{\"name\":\"location generation (per location type, wall clock)\"}},\n");
-            sb.Append("{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":").Append(StartupTrace.LaneSpawnWindow)
-                .Append(",\"args\":{\"name\":\"spawn window totals (aggregated, duration = total)\"}},\n");
             sb.Append("{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":").Append(StartupTrace.MainThreadId)
                 .Append(",\"args\":{\"name\":\"main\"}}");
             foreach (TraceEvent e in events)
@@ -241,7 +239,7 @@ namespace Morgott.Preloader.Profiling
             return sb.ToString();
         }
 
-        /// <summary>WorldGen per-location spans and the spawn-window totals (both on their own lanes, not in self time).</summary>
+        /// <summary>WorldGen per-location spans (own lane, not in self time).</summary>
         private static void AggregatedSections(StringBuilder sb, List<TraceEvent> events)
         {
             List<TraceEvent> locations = events.Where(e => e.Cat == "worldgen").ToList();
@@ -255,94 +253,6 @@ namespace Morgott.Preloader.Profiling
                     sb.AppendLine(F("{0,10:F1}  {1}  ({2})", StartupTrace.DurMs(e.Start, e.End), e.Name, e.Detail));
                 }
             }
-            FrameSections(sb, events);
-            List<TraceEvent> window = events.Where(e => e.Cat == "spawnwindow").ToList();
-            if (window.Count > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine("== Spawn window (LoadMainScene end -> first spawn): per method / mod patch, total ms ==");
-                foreach (TraceEvent e in window.OrderByDescending(e => e.End - e.Start))
-                {
-                    sb.AppendLine(F("{0,10:F1}  {1}{2}  ({3})", StartupTrace.DurMs(e.Start, e.End), e.Name,
-                        e.Detail2 != null ? " @ " + e.Detail2 : "", e.Detail));
-                }
-            }
-        }
-
-        /// <summary>Frame probe (player-loop phases per frame, click -> first spawn) and the Awake/Start totals per world-load
-        /// phase. Hooked time in a frame = top-level main-thread spans overlapping it; the rest is unhooked (native work,
-        /// rendering, scripts without a hook, GC).</summary>
-        private static void FrameSections(StringBuilder sb, List<TraceEvent> events)
-        {
-            List<TraceEvent> frames = events.Where(e => e.Cat == "frame").OrderBy(e => e.Start).ToList();
-            if (frames.Count > 0)
-            {
-                List<TraceEvent> top = TopLevelMain(events);
-                sb.AppendLine();
-                sb.AppendLine(F("== Frames (world-start click -> first spawn): {0} frames, {1:F0} ms ==", frames.Count,
-                    frames.Sum(e => StartupTrace.DurMs(e.Start, e.End))));
-                foreach (IGrouping<string, TraceEvent> phase in frames.GroupBy(e => e.Detail2))
-                {
-                    double total = phase.Sum(e => StartupTrace.DurMs(e.Start, e.End));
-                    double hooked = phase.Sum(e => Overlap(top, e.Start, e.End).Sum(o => o.Ms));
-                    IEnumerable<string> split = events.Where(e => e.Cat == "framephase" && e.Detail2 == phase.Key && e.End > e.Start)
-                        .OrderByDescending(e => e.End - e.Start).Select(e => F("{0} {1:F0}", e.Name, StartupTrace.DurMs(e.Start, e.End)));
-                    sb.AppendLine(F("  {0}: {1} frames, {2:F0} ms, hooked {3:F0} ms, unhooked {4:F0} ms; by player-loop phase: {5}",
-                        phase.Key, phase.Count(), total, hooked, total - hooked, string.Join(", ", split.ToArray())));
-                }
-                sb.AppendLine("  Longest 25 frames (ms, phase split, hooked top-level spans inside):");
-                foreach (TraceEvent f in frames.OrderByDescending(e => e.End - e.Start).Take(25).OrderBy(e => e.Start))
-                {
-                    List<(TraceEvent Span, double Ms)> inside = Overlap(top, f.Start, f.End);
-                    double hooked = inside.Sum(o => o.Ms);
-                    double dur = StartupTrace.DurMs(f.Start, f.End);
-                    sb.AppendLine(F("{0,10:F1}  @{1:F0}  {2} [{3}]  hooked {4:F0}, unhooked {5:F0}{6}", dur, StartupTrace.ToMs(f.Start), f.Name,
-                        f.Detail, hooked, dur - hooked,
-                        inside.Count == 0 ? "" : ": " + string.Join(", ", inside.OrderByDescending(o => o.Ms).Take(4)
-                            .Select(o => F("{0} {1:F0}", o.Span.Cat == "harmony" ? "harmony " + o.Span.Detail : o.Span.Name, o.Ms)).ToArray())));
-                }
-            }
-            List<TraceEvent> messages = events.Where(e => e.Cat == "unitymsg").ToList();
-            foreach (IGrouping<string, TraceEvent> phase in messages.GroupBy(e => e.Detail2))
-            {
-                sb.AppendLine();
-                sb.AppendLine(F("== Awake/Start of assembly_valheim MonoBehaviours, {0}: {1} methods, self total {2:F0} ms (top {3}) ==",
-                    phase.Key, phase.Count(), phase.Sum(e => StartupTrace.DurMs(e.Start, e.End)), TopN));
-                foreach (TraceEvent e in phase.OrderByDescending(e => e.End - e.Start).Take(TopN))
-                {
-                    sb.AppendLine(F("{0,10:F1}  {1}  ({2})", StartupTrace.DurMs(e.Start, e.End), e.Name, e.Detail));
-                }
-            }
-        }
-
-        /// <summary>Main-thread spans not nested in another span, in start order.</summary>
-        private static List<TraceEvent> TopLevelMain(List<TraceEvent> events)
-        {
-            var result = new List<TraceEvent>();
-            long end = long.MinValue;
-            foreach (TraceEvent e in events.Where(e => e.Ph == 'X' && e.Tid == StartupTrace.MainThreadId).OrderBy(e => e.Start).ThenByDescending(e => e.End))
-            {
-                if (e.Start >= end)
-                {
-                    result.Add(e);
-                    end = e.End;
-                }
-            }
-            return result;
-        }
-
-        private static List<(TraceEvent Span, double Ms)> Overlap(List<TraceEvent> top, long from, long to)
-        {
-            var result = new List<(TraceEvent, double)>();
-            foreach (TraceEvent e in top)
-            {
-                if (e.End <= from || e.Start >= to)
-                {
-                    continue;
-                }
-                result.Add((e, StartupTrace.DurMs(Math.Max(e.Start, from), Math.Min(e.End, to))));
-            }
-            return result;
         }
 
         /// <summary>World-load wall clock (click -> loading screen -> ZoneSystem.Start) and the spans inside that
