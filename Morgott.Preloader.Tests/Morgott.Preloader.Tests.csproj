@@ -22,6 +22,7 @@
     <Compile Include="..\BundleCache\ResourceSource.cs" Link="src\ResourceSource.cs" />
     <Compile Include="..\Core\AtomicFile.cs" Link="src\AtomicFile.cs" />
     <Compile Include="..\Core\Hash.cs" Link="src\Hash.cs" />
+    <Compile Include="..\ModHotspots\ShardColourFilter.cs" Link="src\ShardColourFilter.cs" />
     <None Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

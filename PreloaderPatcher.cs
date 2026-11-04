@@ -117,6 +117,10 @@ namespace Morgott.Preloader
                 {
                     ModHotspotsDump.Install(new Harmony(ModHotspotsHarmonyId));
                 }
+                if (Config.EpicLootShardColours?.Value == true)
+                {
+                    EpicLootShardColours.Install();
+                }
                 if (worldGen)
                 {
                     // Game types: only once the engine is up.

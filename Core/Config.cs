@@ -31,6 +31,8 @@ namespace Morgott.Preloader.Core
 
         public static ConfigEntry<bool> VneiIndexingEnabled { get; private set; }
 
+        public static ConfigEntry<bool> EpicLootShardColours { get; private set; }
+
         public static ConfigEntry<bool> ParallelBiomeData { get; private set; }
 
         public static ConfigEntry<bool> EarlyReject { get; private set; }
@@ -107,6 +109,9 @@ namespace Morgott.Preloader.Core
                 "items (with their icon renders) during the loading screen, the recipes in the frames after the spawn (other " +
                 "mods' recipe patches need the player). Same calls in the same order, same index and UI. Only VNEI 0.17.6's " +
                 "exact code is replaced (matched by its IL). Read once at launch.");
+            EpicLootShardColours = file.Bind("ModHotspots", "EpicLootShardColours", true,
+                "Silence Epic Loot's 18 startup errors for the shard colours Morgott.EpicLoot patch 96 removes on purpose " +
+                "(one info line names them instead); any other colour's error stays. Read once at launch.");
             DumpModHotspots = file.Bind("Diagnostics", "DumpModHotspots", false,
                 "At the main menu write the state the ModHotspots replacements produce (e.g. every ShaderReplacer material " +
                 "and its shader) to BepInEx\\Morgott.Preloader\\modhotspots-state.txt, for diffing a toggle off against on.");
