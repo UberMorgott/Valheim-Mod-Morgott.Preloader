@@ -87,7 +87,10 @@ Where the rest of the world load goes (profiler, same world):
   replaced by the Morgott.UI item browser.
 - 0.10.0: renamed FastStartup -> Morgott.Preloader (DLL, cfg, data folder, Harmony IDs; old cfg ported via
   `docs\cfgport-3.L1.map`). Removed `[Profiler] TimeSpawnWindow` (spawn-window + frame probe),
-  `[Profiler] TimeUnityMessages` and the modpack prebuilt bundle cache.
+  `[Profiler] TimeUnityMessages` and the modpack prebuilt bundle cache. Old `BepInEx\FastStartup\` data is not
+  migrated (one cold bundle / worldgen / minimap cache start). Kept for the harness: `Morgott.Preloader.Profiling.SpikeProbe`
+  (`Segment` / `Flush`) and `ScriptProbe` members it reflects, the "menu ready" / "first spawn" log lines (updater ready
+  pattern `Morgott.Preloader] menu ready`). No BepInPlugin, no Core / Jotunn reference (runs before Jotunn exists).
 - 0.9.0: [BundleCache] EagerFirstBuild (on): cold first launch with an empty cache 55.2 s -> 37.7 s to the menu,
   main-thread bundle time 17.9 s -> 1.2 s (28 bundles, 1094 MB, built in 16 s on 6 threads); warm launch unchanged.
   A cached copy Unity cannot load falls back to the original load and is rebuilt. ConfigSaveBatcher defers only
