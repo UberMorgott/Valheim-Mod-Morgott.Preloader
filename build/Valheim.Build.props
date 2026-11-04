@@ -1,5 +1,5 @@
 <Project>
-  <!-- Valheim.Build v4 -->
+  <!-- Valheim.Build v5 -->
   <!--
     Canonical shared build settings for Valheim mod repos.
     Source of truth: UberMorgott/Valheim-Tools-Autotest, valbuild/Valheim.Build.props.
@@ -16,7 +16,7 @@
         build/Polyfills.cs.txt (compiler attributes copied from dotnet/runtime; opt out ValheimPolyfills=false).
         TargetFramework stays in each csproj (plugins: net472).
       plugin (csproj sets <ValheimPlugin>true</ValheimPlugin>): game BepInEx/0Harmony refs,
-        optional Jotunn and publicizer.
+        optional Jotunn, publicizer, pinned Morgott.Core / EpicLoot refs (build/ref).
       tests (csproj sets <ValheimTests>true</ValheimTests>): xUnit v3 on Microsoft Testing Platform.
     Opt-in switches are read only by item conditions; items are evaluated after every property of
     the project (csproj included), so a switch set in the csproj body is honoured here.
@@ -24,7 +24,7 @@
   -->
 
   <PropertyGroup>
-    <ValheimBuildVersion>4</ValheimBuildVersion>
+    <ValheimBuildVersion>6</ValheimBuildVersion>
   </PropertyGroup>
 
   <!-- ===== common ===== -->
@@ -126,7 +126,37 @@
     <ValheimBepInExRefs Condition="'$(ValheimBepInExRefs)' == ''">true</ValheimBepInExRefs>
     <ValheimUseJotunn Condition="'$(ValheimUseJotunn)' == ''">false</ValheimUseJotunn>
     <ValheimUsePublicizer Condition="'$(ValheimUsePublicizer)' == ''">false</ValheimUsePublicizer>
+    <ValheimUseCore Condition="'$(ValheimUseCore)' == ''">false</ValheimUseCore>
+    <ValheimUseEpicLoot Condition="'$(ValheimUseEpicLoot)' == ''">false</ValheimUseEpicLoot>
+    <!-- Pinned refs: build/ref/*.dll committed with build/ref/refs.lock (version + SHA256, `valbuild ref add`,
+         checked by `valbuild check`), never the live game folder or the mutable pack copy.
+         Co-development: -p:CoreRef=<local Morgott.Core.dll> compiles against a local Core build instead. -->
+    <CoreRef Condition="'$(CoreRef)' == ''">$(MSBuildThisFileDirectory)ref\Morgott.Core.dll</CoreRef>
+    <ValheimEpicLootRef>$(MSBuildThisFileDirectory)ref\EpicLoot.dll</ValheimEpicLootRef>
+    <!-- build\ref\*.dll are default None items, and RAR's {CandidateAssemblyFiles} beats {HintPathFromItem}: without
+         this, -p:CoreRef was ignored and the pinned Core always won. -->
+    <AssemblySearchPath_UseCandidateAssemblyFiles>false</AssemblySearchPath_UseCandidateAssemblyFiles>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(ValheimPlugin)' == 'true' And '$(ValheimUseCore)' == 'true'">
+    <Reference Include="Morgott.Core" HintPath="$(CoreRef)" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(ValheimPlugin)' == 'true' And '$(ValheimUseEpicLoot)' == 'true'">
+    <Reference Include="EpicLoot" HintPath="$(ValheimEpicLootRef)" Private="false" />
+  </ItemGroup>
+
+  <Target Name="ValheimCheckPinnedRefs" BeforeTargets="ResolveAssemblyReferences" Condition="'$(ValheimPlugin)' == 'true'">
+    <Error Condition="'$(ValheimUseCore)' == 'true' And !Exists('$(CoreRef)')"
+           Text="ValheimUseCore: $(CoreRef) not found; pin it with `valbuild ref add . &lt;Morgott.Core.dll&gt;` or pass -p:CoreRef=&lt;path&gt;" />
+    <Error Condition="'$(ValheimUseEpicLoot)' == 'true' And !Exists('$(ValheimEpicLootRef)')"
+           Text="ValheimUseEpicLoot: $(ValheimEpicLootRef) not found; pin it with `valbuild ref add . &lt;EpicLoot.dll&gt;`" />
+    <!-- EpicLoot 0.15.6 targets net481; plugins target net472 and the game's Mono loads it anyway.
+         Set at target time (before RAR) so a switch set in the csproj body is seen. -->
+    <PropertyGroup Condition="'$(ValheimUseEpicLoot)' == 'true'">
+      <ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>true</ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>
+    </PropertyGroup>
+  </Target>
 
   <!-- BepInEx + HarmonyX from the game's BepInEx\core: the exact runtime versions (0Harmony 2.9.0),
        not the BepInEx.Core/HarmonyX NuGet packages (HarmonyX NuGet 2.10.1 > runtime 2.9.0). -->
