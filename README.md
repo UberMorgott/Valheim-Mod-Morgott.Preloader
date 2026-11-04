@@ -83,6 +83,8 @@ Where the rest of the world load goes (profiler, same world):
 
 ## Changes
 
+- 0.12.0: removed the VNEI indexing ModHotspot (`[ModHotspots] VNEIIndexing`) and its index dump: VNEI left the pack,
+  replaced by the Morgott.UI item browser.
 - 0.10.0: renamed FastStartup -> Morgott.Preloader (DLL, cfg, data folder, Harmony IDs; old cfg ported via
   `docs\cfgport-3.L1.map`). Removed `[Profiler] TimeSpawnWindow` (spawn-window + frame probe),
   `[Profiler] TimeUnityMessages` and the modpack prebuilt bundle cache.
@@ -136,14 +138,10 @@ Config `BepInEx\config\morgott.valheim.preloader.cfg`:
 - `[HarmonyBatching] Enabled` (default `true`): one wrapper build per patched method per `Harmony.PatchAll(assembly)`.
 - `[ModHotspots] ShaderReplacer` (default `true`): run blacks7ar's ShaderReplacer helper (OreMines) with one
   shader lookup instead of one per material.
-- `[ModHotspots] VNEIIndexing` (default `true`): build VNEI's index a few ms per frame instead of in one frame
-  right after the spawn: items (and their icon renders) behind the loading screen, recipes in the ~12 frames after
-  the spawn (VNEI 0.17.6 only, matched by IL). See "VNEI indexing".
 - `[Diagnostics] DumpHarmonyState` (default `false`): write the Harmony patch registry at the main menu to
   `BepInEx\Morgott.Preloader\harmony-state.txt` for diffing two setups.
 - `[Diagnostics] DumpModHotspots` (default `false`): write what the ModHotspots replacements produce (every
-  ShaderReplacer material and its shader) at the main menu to `BepInEx\Morgott.Preloader\modhotspots-state.txt`, and
-  VNEI's whole index on leaving the world (logout / quit, outside the profiled frames) to `modhotspots-vnei.txt`,
+  ShaderReplacer material and its shader) at the main menu to `BepInEx\Morgott.Preloader\modhotspots-state.txt`,
   for diffing a toggle off against on.
 - `[WorldGen] ParallelBiomeData` (default `true`): build the biome/height map of every world load and connect on all
   cores (see "World generation").
@@ -577,34 +575,6 @@ Spike-frame self ms, 16 cores / 2 cores 1 worker (one run each):
   N violation(s)` goes to the log and to the top of `script-breakdown.txt` (with the first offenders when N > 0).
   0 in all six runs of 2026-10-10 07:24-07:41 (VNEI off/on, 16 cores and 2 cores 1 worker, a spike tour; there
   `ZoneSystem.Update` +4.0 ms self).
-
-## VNEI indexing
-
-VNEI 0.17.6 builds its index (3026 items, 4383 recipes, a Jotunn icon render per icon-less prefab = PNG decode from
-the icon cache, localization, the recipe graph) in the first frame with a local player. `[ModHotspots] VNEIIndexing`
-runs the same calls in the same order, 6 ms per frame: `IndexModNames`, `GetPrefabs`, `IndexItems`, `DisableItems`
-while the loading screen waits for the spawn; `IndexRecipes`, `IndexItemRecipes`, the width/blacklist pass,
-favourites and `IndexFinished` from the spawn frame on, then `UpdateKnown` and VNEI's three subscriptions.
-`HasIndexed` reads false until the end, VNEI's hotkeys are ignored meanwhile, and a second `IndexAll` is refused.
-The recipes wait for the player because other mods patch `Recipe.GetRequiredStationLevel` with code that needs it:
-the ItemManager copy in Warfare (`Patch_MaximumRequiredStationLevel`) calls
-`Player.m_localPlayer.GetCurrentCraftingStation()` and threw before the spawn in a first version (1267 of 4383
-recipes indexed). Known limit: leaving the world during the loading screen keeps the items of that load; the recipes
-are then built at the next spawn.
-
-Measured 2026-10-10 (`-Shots 20-hud`, SpikeProbe + ScriptBreakdown, VNEI 0.17.6, full pack):
-
-| run | first play frame | VNEI `Plugin.Update` there | index work outside it | world load |
-| --- | --- | --- | --- | --- |
-| off, 16 cores (2 runs) | 880.8 ms (2nd run) | 1 120 / 718 ms | - | 17.39 / 14.68 s |
-| on, 16 cores (2 runs) | 203.8 ms (1st run) | 6.2 ms | items 676-756 ms in 106-117 loading frames (longest 15.7-17.6 ms), recipes 72-75 ms in 11-12 play frames (longest 7.7-10.2 ms), UpdateKnown 2.7-4.0 ms | 14.35 / 14.80 s |
-| on, 2 cores 1 worker | - | 6.0 ms | items 893 ms in 137 frames (longest 23.2 ms), recipes 86.5 ms in 13 frames | 16.99 s |
-
-The first off run rendered BossAwakening 0.3.2's 9 new icons (cold icon cache, 1 120 ms); later runs read them from
-the cache. Equivalence: `[Diagnostics] DumpModHotspots` index dumps (12 796 lines: items with names, flags, mod,
-icon texture + pixel hash, result / ingredient recipe indices; both name lookups; every recipe with stations,
-groups, amounts, width; subscriber counts) are byte-identical off (2nd run) vs on (4 runs: 16 cores, 2 cores, a spike tour), SHA256
-`341DDB90...`. The first off run differs only in the 9 freshly rendered icons (RGBA32 render vs ARGB32 cache read).
 
 ## Build
 

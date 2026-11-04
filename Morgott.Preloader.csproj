@@ -8,12 +8,10 @@
     <AssemblyName>Morgott.Preloader</AssemblyName>
     <RootNamespace>Morgott.Preloader</RootNamespace>
     <Product>Morgott.Preloader</Product>
-    <Version>0.11.1</Version>
+    <Version>0.12.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
-    <!-- VNEI.dll targets net481; only its metadata is referenced (ModHotspots), the game runs it on Unity's Mono. -->
-    <ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>true</ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>
   </PropertyGroup>
 
   <ItemGroup>
@@ -64,12 +62,6 @@
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <!-- Third-party plugins for ModHotspots replacements: only touched after the plugin is found loaded and its IL
-         fingerprint matched (ModHotspots\VneiIndexingFix.cs). -->
-    <Reference Include="VNEI">
-      <HintPath>$(PluginsDir)\Vnei\VNEI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine">

@@ -14,8 +14,6 @@ namespace Morgott.Preloader.ModHotspots
         {
             if (Config.ShaderReplacerFixEnabled.Value)
                 Lifecycle.ChainloaderStarted += () => Log.Guard("ModHotspots ShaderReplacer", () => ShaderReplacerFix.Install(harmony));
-            if (Config.VneiIndexingEnabled.Value)
-                Lifecycle.ChainloaderStarted += () => Log.Guard("ModHotspots VNEI indexing", () => VneiIndexingFix.Install(harmony));
         }
     }
 }

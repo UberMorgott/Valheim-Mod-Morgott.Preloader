@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.CompilerServices;
 using System.Text;
 using BepInEx;
 using Morgott.Preloader.Core;
@@ -19,15 +18,7 @@ namespace Morgott.Preloader.ModHotspots
         public static void Install(Harmony harmony)
         {
             Lifecycle.MenuReady += () => Log.Guard("ModHotspots state dump", Write);
-            Lifecycle.ChainloaderStarted += () => Log.Guard("ModHotspots VNEI dump", () =>
-            {
-                if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(VneiIndexingFix.Guid)) InstallVnei(harmony);
-            });
         }
-
-        // VneiDump references VNEI types: only JIT-compiled once VNEI is known to be loaded.
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private static void InstallVnei(Harmony harmony) => VneiDump.Install(harmony);
 
         private static void Write()
         {

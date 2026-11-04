@@ -29,8 +29,6 @@ namespace Morgott.Preloader.Core
 
         public static ConfigEntry<bool> DumpModHotspots { get; private set; }
 
-        public static ConfigEntry<bool> VneiIndexingEnabled { get; private set; }
-
         public static ConfigEntry<bool> EpicLootShardColours { get; private set; }
 
         public static ConfigEntry<bool> ParallelBiomeData { get; private set; }
@@ -104,11 +102,6 @@ namespace Morgott.Preloader.Core
                 "Run the ShaderReplacer helper embedded in blacks7ar mods (OreMines) with one shader lookup instead of one " +
                 "per material. Same shader assignments in the same order; only the known slow version of the helper is " +
                 "replaced (matched by its IL). Read once at launch.");
-            VneiIndexingEnabled = file.Bind("ModHotspots", "VNEIIndexing", true,
-                "Build VNEI's index a few ms per frame instead of in one ~1-1.5 s frame right after the player spawns: the " +
-                "items (with their icon renders) during the loading screen, the recipes in the frames after the spawn (other " +
-                "mods' recipe patches need the player). Same calls in the same order, same index and UI. Only VNEI 0.17.6's " +
-                "exact code is replaced (matched by its IL). Read once at launch.");
             EpicLootShardColours = file.Bind("ModHotspots", "EpicLootShardColours", true,
                 "Silence Epic Loot's 18 startup errors for the shard colours Morgott.EpicLoot patch 96 removes on purpose " +
                 "(one info line names them instead); any other colour's error stays. Read once at launch.");
