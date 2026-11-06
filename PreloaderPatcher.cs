@@ -28,6 +28,7 @@ namespace Morgott.Preloader
         private const string LifecycleHarmonyId = "morgott.valheim.preloader.lifecycle";
         private const string BundleCacheHarmonyId = "morgott.valheim.preloader.bundlecache";
         private const string ConfigSaveHarmonyId = "morgott.valheim.preloader.configsave";
+        private const string ConfigWatcherHarmonyId = "morgott.valheim.preloader.configwatcher";
         private const string HarmonyBatchHarmonyId = "morgott.valheim.preloader.harmonybatch";
         private const string ModHotspotsHarmonyId = "morgott.valheim.preloader.modhotspots";
         public const string WorldGenHarmonyId = "morgott.valheim.preloader.worldgen";
@@ -70,6 +71,7 @@ namespace Morgott.Preloader
                 }
                 bool bundles = Config.BundleCacheEnabled?.Value == true;
                 bool configSave = Config.ConfigSaveBatcherEnabled?.Value == true;
+                bool configWatcher = Config.ConfigWatcherShared?.Value == true;
                 bool harmonyBatching = Config.HarmonyBatchingEnabled?.Value == true;
                 bool localization = Config.LocalizationCacheEnabled?.Value == true;
                 bool dump = Config.DumpHarmonyState?.Value == true;
@@ -77,7 +79,7 @@ namespace Morgott.Preloader
                 bool hotspotsDump = Config.DumpModHotspots?.Value == true;
                 bool worldGen = Config.ParallelBiomeData != null && Config.WorldGenAny;
                 bool spikes = Config.SpikeProbe?.Value == true;
-                if (bundles || configSave || harmonyBatching || localization || dump || hotspots || hotspotsDump || worldGen || spikes)
+                if (bundles || configSave || configWatcher || harmonyBatching || localization || dump || hotspots || hotspotsDump || worldGen || spikes)
                 {
                     Lifecycle.Install(new Harmony(LifecycleHarmonyId));
                 }
@@ -89,7 +91,11 @@ namespace Morgott.Preloader
                 }
                 if (configSave)
                 {
-                    Log.Guard("ConfigSaveBatcher install", () => ConfigSaveBatcher.Install(new Harmony(ConfigSaveHarmonyId)));
+                    Log.Guard("ConfigSaveBatcher install", () => ConfigSaveBatcher.Install(new Harmony(ConfigSaveHarmonyId), Config.ConfigSaveHoldWorldLoad.Value));
+                }
+                if (configWatcher)
+                {
+                    Log.Guard("ConfigWatcherCache install", () => ConfigWatcherCache.Install(new Harmony(ConfigWatcherHarmonyId)));
                 }
                 if (harmonyBatching)
                 {

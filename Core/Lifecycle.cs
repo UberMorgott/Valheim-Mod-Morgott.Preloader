@@ -23,6 +23,9 @@ namespace Morgott.Preloader.Core
 
         public static event Action MenuReady;
 
+        /// <summary>End of the first successful <c>Game.SpawnPlayer</c> (Game.cs:484), main thread.</summary>
+        public static event Action WorldSpawned;
+
         /// <summary>Patcher Finish: patches only a BepInEx method, so no Unity/game type initializer runs yet.</summary>
         public static void Install(Harmony harmony)
         {
@@ -99,6 +102,7 @@ namespace Morgott.Preloader.Core
                 "world load {0:F2} s (click -> first spawn): click -> LoadMainScene end {1:F2} s, freeze (-> main scene loaded) {2:F2} s, -> spawn {3:F2} s",
                 Sec(click, now), Sec(click, _loadMainEnd), _mainLoaded != 0 ? Sec(_loadMainEnd, _mainLoaded) : -1,
                 _mainLoaded != 0 ? Sec(_mainLoaded, now) : -1));
+            Log.Guard("WorldSpawned handlers", () => WorldSpawned?.Invoke());
         }
 
         private static double Sec(long from, long to) => (to - from) / (double)Stopwatch.Frequency;

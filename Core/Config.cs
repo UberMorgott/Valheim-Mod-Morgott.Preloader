@@ -19,6 +19,10 @@ namespace Morgott.Preloader.Core
 
         public static ConfigEntry<bool> ConfigSaveBatcherEnabled { get; private set; }
 
+        public static ConfigEntry<bool> ConfigSaveHoldWorldLoad { get; private set; }
+
+        public static ConfigEntry<bool> ConfigWatcherShared { get; private set; }
+
         public static ConfigEntry<bool> LocalizationCacheEnabled { get; private set; }
 
         public static ConfigEntry<bool> HarmonyBatchingEnabled { get; private set; }
@@ -88,6 +92,13 @@ namespace Morgott.Preloader.Core
                 "While the chainloader loads plugins, write each changed .cfg once at the end instead of on every Bind/value " +
                 "change (BepInEx rewrites the whole file each time). Also flushed before a pending file is reloaded and on " +
                 "process exit. Read once at launch.");
+            ConfigSaveHoldWorldLoad = file.Bind("ConfigSaveBatcher", "HoldThroughWorldLoad", true,
+                "Also batch those saves while a world loads, until the first connection to/from a server (before any " +
+                "server-synced value arrives, so only local values are written), the first spawn or the return to the menu. " +
+                "Needs Enabled; not on a dedicated server. Read once at launch.");
+            ConfigWatcherShared = file.Bind("ConfigWatcher", "SharedPolling", true,
+                "Mods' config file watchers (Mono polls each one every 0.75 s) share one read of the files per poll instead " +
+                "of each re-reading the same BepInEx\\config folder. A change is still seen within one poll. Read once at launch.");
             LocalizationCacheEnabled = file.Bind("LocalizationCache", "Enabled", true,
                 "Parse each vanilla localization CSV once per language and replay its rows on later loads (in memory, this " +
                 "session only). Other mods' localization patches still run; switching language rebuilds the table exactly as " +

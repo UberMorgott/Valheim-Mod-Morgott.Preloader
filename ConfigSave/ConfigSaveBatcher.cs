@@ -19,6 +19,11 @@ namespace Morgott.Preloader.ConfigSave
     /// throws), at the main menu (deferring stops) and on process exit. <c>SaveOnConfigSet</c> is never touched.
     /// A <c>Reload()</c> of a pending file writes it first, unless the file changed on disk since last seen (an outside
     /// edit): then the reload reads that edit and the file stays pending.
+    /// With <c>holdWorldLoad</c> (not a dedicated server) the same deferral runs again from <c>FejdStartup.LoadMainScene</c>
+    /// (mods bind per-item configs in main-scene Awakes) until the first of: <c>ZNet.OnNewConnection</c> (ZNet.cs:843, every
+    /// peer, before any RPC: no server-synced value exists yet, so held files are written with local values only),
+    /// <c>Game.SpawnPlayer</c> end, <c>FejdStartup.Start</c> (back at the menu), a <c>LoadMainScene</c> throw, the first save
+    /// after 180 s, process exit.
     /// </summary>
     internal static class ConfigSaveBatcher
     {
@@ -28,17 +33,22 @@ namespace Morgott.Preloader.ConfigSave
         /// <summary>Pending file -> its disk stamp (write time, length) when last seen (first deferral or last reload).</summary>
         private static readonly Dictionary<ConfigFile, (long Ticks, long Length)> Stamps = new Dictionary<ConfigFile, (long, long)>();
 
+        private const long MaxWorldHoldSeconds = 180;
+
         private static bool _active;
+
+        /// <summary>Stopwatch timestamp after which a world-load hold ends at the next save; 0 = no world-load hold.</summary>
+        private static long _holdEnd;
         private static int _deferred;
         private static int _explicit;
 
         /// <summary>Set while this module itself writes a file, so its own Save call is not deferred.</summary>
         [ThreadStatic] private static bool _bypass;
 
-        public static void Install(Harmony harmony)
+        public static void Install(Harmony harmony, bool holdWorldLoad)
         {
             harmony.Patch(AccessTools.DeclaredMethod(typeof(Chainloader), nameof(Chainloader.Start)),
-                prefix: Hook(nameof(StartPrefix), Priority.First), finalizer: Hook(nameof(StartFinalizer), Priority.Last));
+                prefix: Hook(nameof(Begin), Priority.First), finalizer: Hook(nameof(StartFinalizer), Priority.Last));
             harmony.Patch(AccessTools.DeclaredMethod(typeof(ConfigFile), nameof(ConfigFile.Save)),
                 prefix: Hook(nameof(SavePrefix), Priority.Last), postfix: Hook(nameof(SavePostfix), Priority.Last));
             harmony.Patch(AccessTools.DeclaredMethod(typeof(ConfigFile), nameof(ConfigFile.Reload)),
@@ -46,11 +56,46 @@ namespace Morgott.Preloader.ConfigSave
             Lifecycle.MenuReady += () => Flush("main menu", stop: true);
             AppDomain.CurrentDomain.ProcessExit += (_, __) => Flush("process exit", stop: true);
             AppDomain.CurrentDomain.DomainUnload += (_, __) => Flush("domain unload", stop: true);
+            if (holdWorldLoad)
+            {
+                // Game types: only once the engine is up.
+                Lifecycle.ChainloaderInitialized += () => Log.Guard("ConfigSaveBatcher world load hooks", () => InstallWorldLoad(harmony));
+            }
         }
+
+        private static void InstallWorldLoad(Harmony harmony)
+        {
+            if (UnityEngine.Application.isBatchMode) return;
+            harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "LoadMainScene"), prefix: Hook(nameof(WorldBegin), Priority.First),
+                finalizer: Hook(nameof(LoadMainSceneFinalizer), Priority.Last));
+            harmony.Patch(AccessTools.DeclaredMethod(typeof(ZNet), "OnNewConnection"), prefix: Hook(nameof(ConnectPrefix), Priority.First));
+            harmony.Patch(AccessTools.DeclaredMethod(typeof(Game), "SpawnPlayer"), finalizer: Hook(nameof(SpawnFinalizer), Priority.Last));
+            harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "Start"), postfix: Hook(nameof(MenuPostfix), Priority.Last));
+        }
+
+        private static void WorldBegin()
+        {
+            lock (Lock)
+            {
+                _active = true;
+                _holdEnd = Stopwatch.GetTimestamp() + MaxWorldHoldSeconds * Stopwatch.Frequency;
+            }
+        }
+
+        private static void LoadMainSceneFinalizer(Exception __exception)
+        {
+            if (__exception != null) Flush("world load failed", stop: true);
+        }
+
+        private static void ConnectPrefix() => Flush("server connect", stop: true);
+
+        private static void SpawnFinalizer() => Flush("world spawn", stop: true);
+
+        private static void MenuPostfix() => Flush("main menu", stop: true);
 
         private static HarmonyMethod Hook(string name, int priority) => new HarmonyMethod(AccessTools.Method(typeof(ConfigSaveBatcher), name), priority);
 
-        private static void StartPrefix()
+        private static void Begin()
         {
             lock (Lock) _active = true;
         }
@@ -61,9 +106,17 @@ namespace Morgott.Preloader.ConfigSave
         {
             __state = false;
             if (!__runOriginal || _bypass) return __runOriginal;
+            bool timedOut;
             lock (Lock)
             {
                 if (!_active) return true;
+                timedOut = _holdEnd != 0 && Stopwatch.GetTimestamp() > _holdEnd;
+            }
+            if (timedOut)
+            {
+                // A world load stuck this long (no connect / spawn / menu): stop holding, this save runs as vanilla.
+                Flush("world load timeout", stop: true);
+                return true;
             }
             // BepInEx's implicit saves are guarded by SaveOnConfigSet, so with it off every call is a mod's own.
             if (!__instance.SaveOnConfigSet || !IsImplicitSave())
@@ -177,6 +230,7 @@ namespace Morgott.Preloader.ConfigSave
             {
                 if (!_active) return;
                 _active = !stop;
+                if (stop) _holdEnd = 0;
                 files = Pending.ToArray();
                 deferred = _deferred;
                 explicitSaves = _explicit;

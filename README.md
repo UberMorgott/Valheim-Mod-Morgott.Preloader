@@ -83,6 +83,9 @@ Where the rest of the world load goes (profiler, same world):
 
 ## Changes
 
+- 0.13.0: `[ConfigSaveBatcher] HoldThroughWorldLoad` (config saves batched through the world load, flushed before the
+  first server connection) and `[ConfigWatcher] SharedPolling` (Mono config watchers share one file-system read per poll
+  pass).
 - 0.12.0: removed the VNEI indexing ModHotspot (`[ModHotspots] VNEIIndexing`) and its index dump: VNEI left the pack,
   replaced by the Morgott.UI item browser.
 - 0.10.0: renamed FastStartup -> Morgott.Preloader (DLL, cfg, data folder, Harmony IDs; old cfg ported via
@@ -312,6 +315,25 @@ here: 727 while plugins load, 395 more from AdventureBackpacks while the menu sc
   `Bind` defaults are written again on the next launch anyway. A write error is logged by Morgott.Preloader instead of
   surfacing inside the mod's `Bind` call. Code reading a `.cfg` with plain file IO during startup sees the copy
   from the last flush.
+- `[ConfigSaveBatcher] HoldThroughWorldLoad` (default `true`, not on a dedicated server): the same deferral runs again
+  from `FejdStartup.LoadMainScene` until the first of `ZNet.OnNewConnection` (every peer, client or server side, before
+  any RPC: no server-synced value has arrived, so held files hold local values only), the end of `Game.SpawnPlayer`,
+  `FejdStartup.Start` (back at the menu), a `LoadMainScene` throw, the first save after 180 s, process exit. Jotunn's
+  `ZNet.Start` swap of admin-only entries to defaults is written as local values by Jotunn's own `GetSerializedValue`
+  patch, exactly as without the hold. Log: `ConfigSaveBatcher: N saves deferred -> M file writes at world spawn`.
+
+## Config watcher polling
+
+Unity's Mono on Windows runs every `FileSystemWatcher` through the managed polling `System.IO.DefaultWatcher` (game
+`System.dll`: one thread, `Thread.Sleep(750)`, then per watcher `DoFiles` -> `Directory.GetFileSystemEntries` + two
+stats per known file). 11 pack plugins create watchers, most on the same `BepInEx\config` folder.
+`[ConfigWatcher] SharedPolling` (default `true`): within one poll pass each path's reads (`Directory.Exists`,
+`GetDirectories`, `GetFileSystemEntries(dir, mask)`, `File.Exists`, `GetCreationTime`, `GetLastWriteTime`, also in
+`CreateFileData`) are made once and shared by the other watchers; the pass's `Thread.Sleep` starts a fresh cache. Poll
+rate unchanged; a change is seen at most one pass later; a throwing call is not cached. A watcher's first scan
+(`StartDispatching`, main thread) reads the disk directly. Log at the menu and first spawn:
+`ConfigWatcherCache at <when>: N watchers, S watcher scans in T ms, file-system calls R real + C shared`.
+Missing / reshaped `DefaultWatcher` members -> one info line, vanilla polling.
 
 ## Localization cache
 
