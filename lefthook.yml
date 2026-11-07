@@ -41,12 +41,15 @@
 # to commit every change. -Quiet suppresses output only on a GREEN run -- a failure
 # still prints everything (check.ps1). CI keeps its output: that is where the
 # [PASS] lines earn their keep, which is why this is not a global default.
-# Fast lane (user 2026-11-08): commits gate only the staged scope; qgate -All -Full runs before the VPS publish (valheim-pack.ps1)
+#
+# No -Full here (quality-gate#200): -Full takes the machine-wide slot queue (#123),
+# and commits in ~15 parallel worktrees waited 18-30 min behind other repos' full
+# runs. The full lane runs at pre-push below, where the work leaves the machine.
 pre-commit:
   jobs:
     - &quality_gate
       name: quality-gate
-      run: 'if uname -o 2>/dev/null | grep -q Msys; then qgate.cmd -Quiet; else qgate -Quiet; fi'
+      run: 'if uname -o 2>/dev/null | grep -q Msys; then qgate.cmd -All -Quiet; else qgate -All -Quiet; fi'
 
 # A merge that commits on its own does NOT run pre-commit: git runs
 # pre-merge-commit for that. Measured on git 2.53 -- with only pre-commit
@@ -77,11 +80,12 @@ pre-merge-commit:
 # clean checked-out HEAD, then runs the same -All -Full gate on it. Its own job, not
 # the anchor: the run line differs, and the stdin parsing has to live in the gate
 # because this string loses its quotes (third trap above).
+# LOCAL OVERRIDE (user 2026-11-08): pre-push runs the fast lane too; qgate -All -Full runs only in
+# E:\DEV\mod-updaters-vps\tools\valheim-pack.ps1 -Upload, per published own-mod repo.
 pre-push:
   jobs:
     - name: quality-gate
-      use_stdin: true
-      run: 'if uname -o 2>/dev/null | grep -q Msys; then qgate.cmd pre-push; else qgate pre-push; fi'
+      run: 'if uname -o 2>/dev/null | grep -q Msys; then qgate.cmd -All -Quiet; else qgate -All -Quiet; fi'
 
 # The agent Stop hook is deliberately NOT generated through lefthook's `ai:`
 # key. Measured on 2.1.12: the generated command is `lefthook run <hook>`, which
