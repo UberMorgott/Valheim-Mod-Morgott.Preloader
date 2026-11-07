@@ -41,11 +41,12 @@
 # to commit every change. -Quiet suppresses output only on a GREEN run -- a failure
 # still prints everything (check.ps1). CI keeps its output: that is where the
 # [PASS] lines earn their keep, which is why this is not a global default.
+# Fast lane (user 2026-11-08): commits gate only the staged scope; qgate -All -Full runs before the VPS publish (valheim-pack.ps1)
 pre-commit:
   jobs:
     - &quality_gate
       name: quality-gate
-      run: 'if uname -o 2>/dev/null | grep -q Msys; then qgate.cmd -All -Full -Quiet; else qgate -All -Full -Quiet; fi'
+      run: 'if uname -o 2>/dev/null | grep -q Msys; then qgate.cmd -Quiet; else qgate -Quiet; fi'
 
 # A merge that commits on its own does NOT run pre-commit: git runs
 # pre-merge-commit for that. Measured on git 2.53 -- with only pre-commit
