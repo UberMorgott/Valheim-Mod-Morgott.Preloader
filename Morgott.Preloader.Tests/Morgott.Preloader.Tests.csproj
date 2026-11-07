@@ -22,6 +22,7 @@
     <Compile Include="..\BundleCache\ResourceSource.cs" Link="src\ResourceSource.cs" />
     <Compile Include="..\Core\AtomicFile.cs" Link="src\AtomicFile.cs" />
     <Compile Include="..\Core\Hash.cs" Link="src\Hash.cs" />
+    <Compile Include="..\Core\PatchOwners.cs" Link="src\PatchOwners.cs" />
     <Compile Include="..\ModHotspots\ShardColourFilter.cs" Link="src\ShardColourFilter.cs" />
     <Compile Include="..\ConfigSave\WatchCycleCache.cs" Link="src\WatchCycleCache.cs" />
     <None Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
