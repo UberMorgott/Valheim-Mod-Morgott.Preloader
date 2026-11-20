@@ -12,7 +12,7 @@ namespace Morgott.Preloader.ModHotspots
     /// Epic Loot makes its shard items from the fixed <c>ShardType</c> colour list (<c>Shards.CreateAndLoadShardItems</c>,
     /// EL 0.15.6 Shards.cs:542): a colour whose shardstones.json definition is missing or has no Rarities is skipped with
     /// <c>EpicLoot.LogErrorForce</c> "no usable definition for shard colour '...'". Morgott.EpicLoot patch 96 removes the
-    /// 18 plain colour gems on purpose (their effects became affixes), so those 18 lines are noise; the one LogErrorForce
+    /// 18 plain colour gems (their effects became affixes) and the 7 retired boss power shards on purpose, so those lines are noise; the one LogErrorForce
     /// call of that method goes to <see cref="Skip"/>, which swallows only the <see cref="ShardColourFilter.Colours"/> and passes
     /// any other skip through to Epic Loot's own error. One info line names the swallowed colours.
     ///

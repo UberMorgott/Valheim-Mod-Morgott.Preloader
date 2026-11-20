@@ -6,12 +6,13 @@ namespace Morgott.Preloader.ModHotspots
     /// <summary>Pure decision of <see cref="EpicLootShardColours"/> (unit-tested).</summary>
     internal static class ShardColourFilter
     {
-        /// <summary>EL 0.15.6 <c>ShardType</c> 0-9, 30-34, 40-42: the colours Morgott.EpicLoot patch 96 removes. Boss /
-        /// Firewalker / Stormcaller shards keep their definitions.</summary>
+        /// <summary>EL 0.15.6 <c>ShardType</c> 0-9, 30-34, 40-42 and the retired boss power shards 90-96 (2026-11-21): the
+        /// definitions Morgott.EpicLoot patch 96 removes. Firewalker / Stormcaller keep theirs.</summary>
         internal static readonly HashSet<string> Colours = new HashSet<string>(StringComparer.Ordinal)
         {
             "Red", "Yellow", "Cyan", "Black", "Green", "Orange", "Pink", "Purple", "White", "Grey",
-            "DarkGreen", "DarkPurple", "DarkRed", "DarkBlue", "Golden", "LightBlue", "LightGreen", "Peach"
+            "DarkGreen", "DarkPurple", "DarkRed", "DarkBlue", "Golden", "LightBlue", "LightGreen", "Peach",
+            "Eikthyr", "Elder", "Bonemass", "Moder", "Yagluth", "Queen", "Fader"
         };
 
         /// <summary>The colour of Epic Loot's skip message (its first quoted name) when it is one of <see cref="Colours"/>, else null.</summary>
