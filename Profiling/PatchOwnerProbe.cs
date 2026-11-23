@@ -123,6 +123,14 @@ namespace Morgott.Preloader.Profiling
             if (Owners.ContainsKey(method) || _skip.Contains(id) || ResolveCache == null) return false;
             try
             {
+                if (method.GetMethodBody() is MethodBody body && DetourSafety.EndsInHandler(body)) return false;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+            try
+            {
                 GuardedPatch(_harmony, method, _pendingPath, id, _prefix, _finalizer);
                 Owners[method] = (owner + " [" + method.Module.Assembly.GetName().Name + "]", target);
                 return true;

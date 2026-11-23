@@ -68,9 +68,9 @@ namespace Morgott.Preloader.Profiling
         private const int SpawnFrames = 5;
 
         // Assemblies skipped the way StressProf skips them (native crashes while detouring in the lab; their time stays
-        // in the wrapped game callers).
+        // in the wrapped game callers). SkidbladnirLab = the lab harness plugin: timing the harness itself is meaningless.
         private static readonly HashSet<string> SkipAsm = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            { "Warfare", "Wizardry", "Armory", "Morgott.Preloader", "0Harmony", "BepInEx", "BepInEx.Preloader", "MonoMod.Utils", "MonoMod.RuntimeDetour" };
+            { "Warfare", "Wizardry", "Armory", "Morgott.Preloader", "0Harmony", "BepInEx", "BepInEx.Preloader", "MonoMod.Utils", "MonoMod.RuntimeDetour", "SkidbladnirLab" };
 
         private static readonly HashSet<string> PluginMsgs = new HashSet<string> { "Update", "FixedUpdate", "LateUpdate", "OnGUI" };
         private static readonly HashSet<string> VanillaMsgs = new HashSet<string>
@@ -88,7 +88,7 @@ namespace Morgott.Preloader.Profiling
         private static bool _on;
         private static int _frameCalls;
 
-        private static int _wrappedPatches, _wrappedPlugin, _wrappedVanilla, _failed, _skipped;
+        private static int _wrappedPatches, _wrappedPlugin, _wrappedVanilla, _failed, _skipped, _unpatchable;
         private static double _installSec;
         private static double _costTicksPerCall;
         private static long _playFrames, _playCalls, _spikeFrameCalls, _spikeFrames;
@@ -148,7 +148,10 @@ namespace Morgott.Preloader.Profiling
             {
                 if (m == null || m.IsAbstract || m.ContainsGenericParameters || m.DeclaringType == null || m.DeclaringType.ContainsGenericParameters) return;
                 if (SkipAsm.Contains(m.DeclaringType.Assembly.GetName().Name) || !seen.Add(m)) return;
-                if (Try(() => m.GetMethodBody(), null) != null) targets.Add((m, owner, name, kind));
+                MethodBody body = Try(() => m.GetMethodBody(), null);
+                if (body == null) return;
+                if (Try(() => DetourSafety.EndsInHandler(body), true)) _unpatchable++;
+                else targets.Add((m, owner, name, kind));
             }
 
             // A: foreign patch methods on anything (snapshot: wrapping them adds our own patches)
@@ -217,8 +220,8 @@ namespace Morgott.Preloader.Profiling
             _installSec = sw.Elapsed.TotalSeconds;
             _on = true;
             Log.Info(string.Format(CultureInfo.InvariantCulture,
-                "Script probe: {0} targets ({1} mod patch methods, {2} plugin messages/coroutines/ticks, {3} vanilla messages); wrapped {4}+{5}+{6}, failed {7}, skipped {8}; {9:F1} s; {10:F0} ns per wrapped call",
-                targets.Count, patches, plugin, vanilla, _wrappedPatches, _wrappedPlugin, _wrappedVanilla, _failed, _skipped, _installSec, _costTicksPerCall * MsPerTick * 1e6));
+                "Script probe: {0} targets ({1} mod patch methods, {2} plugin messages/coroutines/ticks, {3} vanilla messages); wrapped {4}+{5}+{6}, failed {7}, skipped {8}, {11} left out (IL ends in a handler, see DetourSafety); {9:F1} s; {10:F0} ns per wrapped call",
+                targets.Count, patches, plugin, vanilla, _wrappedPatches, _wrappedPlugin, _wrappedVanilla, _failed, _skipped, _installSec, _costTicksPerCall * MsPerTick * 1e6, _unpatchable));
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]

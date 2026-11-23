@@ -25,6 +25,7 @@
     <Compile Include="..\Core\PatchOwners.cs" Link="src\PatchOwners.cs" />
     <Compile Include="..\ModHotspots\ShardColourFilter.cs" Link="src\ShardColourFilter.cs" />
     <Compile Include="..\ConfigSave\WatchCycleCache.cs" Link="src\WatchCycleCache.cs" />
+    <Compile Include="..\Profiling\DetourSafety.cs" Link="src\DetourSafety.cs" />
     <None Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
