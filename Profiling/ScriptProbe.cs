@@ -422,9 +422,16 @@ namespace Morgott.Preloader.Profiling
             Table("top 25 methods by single-frame max", rows.OrderByDescending(r => r.PlayMax), 25);
             sb.Append("== first ").Append(SpawnFrames).Append(" play frames after the spawn (owner|method self ms [+in hooks] [x calls])\n");
             foreach (string l in spawn) sb.Append(l).Append('\n');
+            // Every row, so a method below the top tables can be compared A/B (the tables rank by session totals).
+            var tsv = new StringBuilder("spikeMs\tinHook\tcalls\tframes\ttop\tplayMs\tplayCalls\tmaxMs\towner\tkind\tmethod\n");
+            foreach (Rec r in rows.OrderByDescending(r => r.PlaySelf + r.PlayHook))
+                tsv.Append(string.Format(CultureInfo.InvariantCulture, "{0:F2}\t{1:F2}\t{2}\t{3}\t{4}\t{5:F2}\t{6}\t{7:F2}\t{8}\t{9}\t{10}\n",
+                    r.SpikeSelf * MsPerTick, r.SpikeHook * MsPerTick, r.SpikeCalls, r.SpikeFrames, r.SpikeTop, (r.PlaySelf + r.PlayHook) * MsPerTick, r.PlayCalls,
+                    r.PlayMax * MsPerTick, r.Owner, r.Kind, r.Name));
             try
             {
                 AtomicFile.WriteAllText(Path.Combine(Profiler.OutputDir, "script-breakdown.txt"), sb.ToString());
+                AtomicFile.WriteAllText(Path.Combine(Profiler.OutputDir, "script-methods.tsv"), tsv.ToString());
             }
             catch (Exception e)
             {
