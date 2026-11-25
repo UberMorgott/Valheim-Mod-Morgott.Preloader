@@ -227,7 +227,7 @@ namespace Morgott.Preloader.WorldGen
                 _deltaRejects += DeltaRejects;
                 _earlyRejects += EarlyRejects;
                 if (!StartupTrace.Recording) return;
-                StartupTrace.Complete("worldgen", Location.m_prefab.Name, _start, end, string.Format(CultureInfo.InvariantCulture,
+                StartupTrace.Complete("worldgen", Location.m_prefab.name, _start, end, string.Format(CultureInfo.InvariantCulture,
                         "busy {0:F1} ms, {1} terrain-delta calls, {2} delta rejects, {3} early rejects{4}",
                         _busy * 1000.0 / Stopwatch.Frequency, ReachDelta, DeltaRejects, EarlyRejects, EarlyReject ? "" : " (EarlyReject not used)"),
                     tid: StartupTrace.LaneWorldGen);

@@ -42,7 +42,7 @@ namespace Morgott.Preloader.WorldGen
             var rows = zs.m_locationInstances.Select(entry =>
             {
                 ZoneSystem.LocationInstance instance = entry.Value;
-                string name = instance.m_location?.m_prefab.Name ?? "<null>";
+                string name = instance.m_location?.m_prefab.name ?? "<null>";
                 return (Name: name, entry.Key.x, entry.Key.y, Line: string.Format(CultureInfo.InvariantCulture,
                     "{0}\t{1},{2}\t{3:x8},{4:x8},{5:x8}\t{6}", name, entry.Key.x, entry.Key.y, Hash.Bits(instance.m_position.x),
                     Hash.Bits(instance.m_position.y), Hash.Bits(instance.m_position.z), instance.m_placed ? "placed" : "-"));
