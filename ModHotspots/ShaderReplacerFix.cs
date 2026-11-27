@@ -27,8 +27,10 @@ namespace Morgott.Preloader.ModHotspots
         {
             Patches info = Harmony.GetPatchInfo(AccessTools.DeclaredMethod(typeof(FejdStartup), "Awake"));
             if (info == null) return;
-            foreach (Patch patch in info.Postfixes)
+            var postfixes = info.Postfixes;
+            for (int i = 0; i < postfixes.Count; i++)
             {
+                Patch patch = postfixes[i];
                 MethodInfo method = patch.PatchMethod;
                 if (method.Name != "ReplaceShaderPatch" || Targets.ContainsKey(method)) continue;
                 string mod = method.DeclaringType?.Assembly.GetName().Name;
@@ -54,7 +56,7 @@ namespace Morgott.Preloader.ModHotspots
         private static bool Prefix(MethodBase __originalMethod)
         {
             if (!Targets.TryGetValue(__originalMethod, out FieldInfo list)) return true;
-            ILookup<string, Shader> byName = null;
+            Dictionary<string, List<Shader>> byName = null;
             foreach (GameObject gameObject in (List<GameObject>)list.GetValue(null))
             {
                 foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
@@ -64,8 +66,23 @@ namespace Morgott.Preloader.ModHotspots
                     {
                         if (material == null) continue;
                         // Read once, on the first material like the original's first call; this walk creates no shaders.
-                        byName = byName ?? Resources.FindObjectsOfTypeAll<Shader>().ToLookup(s => s.name, StringComparer.Ordinal);
-                        foreach (Shader shader in byName[material.shader.name]) material.shader = shader;
+                        if (byName == null)
+                        {
+                            byName = new Dictionary<string, List<Shader>>(StringComparer.Ordinal);
+                            foreach (Shader s in Resources.FindObjectsOfTypeAll<Shader>())
+                            {
+                                if (!byName.TryGetValue(s.name, out List<Shader> bucket))
+                                {
+                                    bucket = new List<Shader>();
+                                    byName[s.name] = bucket;
+                                }
+                                bucket.Add(s);
+                            }
+                        }
+                        if (byName.TryGetValue(material.shader.name, out List<Shader> shaders))
+                        {
+                            for (int i = 0; i < shaders.Count; i++) material.shader = shaders[i];
+                        }
                     }
                 }
             }

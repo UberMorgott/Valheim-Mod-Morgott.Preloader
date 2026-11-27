@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using BepInEx;
@@ -70,7 +71,7 @@ namespace Morgott.Preloader.Profiling
             double endMs = StartupTrace.ToMs(StartupTrace.Now());
             List<TraceEvent> events = snapshot();
             Log.Info(TraceReport.OneLine(events, endMs, endLabel));
-            ThreadPool.QueueUserWorkItem(_ => Export(events, endMs, reason, endLabel, suffix));
+            ThreadPool.QueueUserWorkItem(ExportWorker, new ExportJob(events, endMs, reason, endLabel, suffix));
         }
 
         /// <summary>Quit before the first spawn (crash-free exit mid-startup): write what was recorded, synchronously.</summary>
@@ -79,21 +80,34 @@ namespace Morgott.Preloader.Profiling
             if (!StartupTrace.Recording) return;
             double now = StartupTrace.ToMs(StartupTrace.Now());
             bool menu = _menuReached;
-            Export(StartupTrace.StopAndSnapshot(), now, menu ? "quit before first spawn (partial trace)" : "quit before main menu (partial trace)",
-                "quit", menu ? "-world" : "");
+            Export(new ExportJob(StartupTrace.StopAndSnapshot(), now, menu ? "quit before first spawn (partial trace)" : "quit before main menu (partial trace)",
+                "quit", menu ? "-world" : ""));
         }
 
+        private static void ExportWorker(object state) => Export((ExportJob)state);
+
         /// <summary>Menu profile: trace.json + summary.txt; world profile (process start -> first spawn): trace-world.json + summary-world.txt.</summary>
-        private static void Export(List<TraceEvent> events, double endMs, string reason, string endLabel, string suffix)
+        private static void Export(ExportJob job)
         {
-            if (Interlocked.Exchange(ref suffix.Length == 0 ? ref _menuExported : ref _worldExported, 1) != 0) return;
-            Log.Guard("Trace export", () =>
-            {
-                string header = $"Morgott.Preloader startup profile - {DateTime.Now:yyyy-MM-dd HH:mm:ss} - {reason} - {events.Count} events";
-                AtomicFile.WriteAllText(Path.Combine(OutputDir, "trace" + suffix + ".json"), TraceReport.ChromeTrace(events));
-                AtomicFile.WriteAllText(Path.Combine(OutputDir, "summary" + suffix + ".txt"), TraceReport.Summary(events, endMs, endLabel, header));
-                Log.Info($"Profile written to {OutputDir} (trace{suffix}.json for chrome://tracing / ui.perfetto.dev, summary{suffix}.txt)");
-            });
+            if (Interlocked.Exchange(ref job.Suffix.Length == 0 ? ref _menuExported : ref _worldExported, 1) != 0) return;
+            Log.Guard("Trace export", WriteExport, job);
+        }
+
+        private static void WriteExport(ExportJob job)
+        {
+            string header = $"Morgott.Preloader startup profile - {DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} - {job.Reason} - {job.Events.Count.ToString(CultureInfo.InvariantCulture)} events";
+            AtomicFile.WriteAllText(Path.Combine(OutputDir, "trace" + job.Suffix + ".json"), TraceReport.ChromeTrace(job.Events));
+            AtomicFile.WriteAllText(Path.Combine(OutputDir, "summary" + job.Suffix + ".txt"), TraceReport.Summary(job.Events, job.EndMs, job.EndLabel, header));
+            Log.Info($"Profile written to {OutputDir} (trace{job.Suffix}.json for chrome://tracing / ui.perfetto.dev, summary{job.Suffix}.txt)");
+        }
+
+        private sealed class ExportJob(List<TraceEvent> events, double endMs, string reason, string endLabel, string suffix)
+        {
+            public readonly List<TraceEvent> Events = events;
+            public readonly double EndMs = endMs;
+            public readonly string Reason = reason;
+            public readonly string EndLabel = endLabel;
+            public readonly string Suffix = suffix;
         }
     }
 }

@@ -121,21 +121,8 @@ namespace Morgott.Preloader.WorldGen
             ParallelBiomeData.NormalizeRiverCache(generator);
             try
             {
-                Parallel.For(0, size, i =>
-                {
-                    float wy = (float)(i - half) * pixelSize + halfPixel;
-                    for (int j = 0; j < size; j++)
-                    {
-                        float wx = (float)(j - half) * pixelSize + halfPixel;
-                        Heightmap.Biome biome = generator.GetBiome(wx, wy);
-                        float biomeHeight = generator.GetBiomeHeight(biome, wx, wy, out Color _);
-                        int index = i * size + j;
-                        biomePixels[index] = _pixelColor(__instance, biome);
-                        maskPixels[index] = _maskColor(__instance, wx, wy, biomeHeight, biome);
-                        heightColors[index].r = biomeHeight;
-                        heights[index] = biomeHeight;
-                    }
-                });
+                var work = new MinimapRowWork(__instance, generator, size, pixelSize, half, halfPixel, biomePixels, maskPixels, heightColors, heights);
+                Parallel.For(0, size, work.RunRow);
             }
             catch (Exception e)
             {
@@ -145,9 +132,38 @@ namespace Morgott.Preloader.WorldGen
             long computeMs = stopwatch.ElapsedMilliseconds;
             Upload(__instance, maskPixels, biomePixels, heightColors);
             ZLog.Log("Generating new world minimap done [" + stopwatch.ElapsedMilliseconds + "ms]");
-            Log.Info($"MinimapGen: parallel minimap {size}x{size} in {stopwatch.ElapsedMilliseconds} ms (pixels {computeMs} ms)");
+            Log.Info($"MinimapGen: parallel minimap {size.ToString(CultureInfo.InvariantCulture)}x{size.ToString(CultureInfo.InvariantCulture)} in {stopwatch.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)} ms (pixels {computeMs.ToString(CultureInfo.InvariantCulture)} ms)");
             if (FileHelpers.LocalStorageSupport == LocalStorageSupport.Supported) _save(__instance, maskPixels, biomePixels, heights);
             return false;
+        }
+
+        private sealed class MinimapRowWork(
+            Minimap minimap,
+            WorldGenerator generator,
+            int size,
+            float pixelSize,
+            int half,
+            float halfPixel,
+            Color32[] biomePixels,
+            Color32[] maskPixels,
+            Color[] heightColors,
+            float[] heights)
+        {
+            public void RunRow(int i)
+            {
+                float wy = (float)(i - half) * pixelSize + halfPixel;
+                for (int j = 0; j < size; j++)
+                {
+                    float wx = (float)(j - half) * pixelSize + halfPixel;
+                    Heightmap.Biome biome = generator.GetBiome(wx, wy);
+                    float biomeHeight = generator.GetBiomeHeight(biome, wx, wy, out Color _);
+                    int index = i * size + j;
+                    biomePixels[index] = _pixelColor(minimap, biome);
+                    maskPixels[index] = _maskColor(minimap, wx, wy, biomeHeight, biome);
+                    heightColors[index].r = biomeHeight;
+                    heights[index] = biomeHeight;
+                }
+            }
         }
 
         private static void Upload(Minimap minimap, Color32[] mask, Color32[] biome, Color[] height)
@@ -177,7 +193,7 @@ namespace Morgott.Preloader.WorldGen
             string dir;
             try
             {
-                dir = Path.Combine(_root, string.Format(CultureInfo.InvariantCulture, "{0}_g{1}_{2}", world.m_seed, world.m_worldGenVersion, Fingerprint(__instance)));
+                dir = Path.Combine(_root, $"{world.m_seed.ToString(CultureInfo.InvariantCulture)}_g{world.m_worldGenVersion.ToString(CultureInfo.InvariantCulture)}_{Fingerprint(__instance)}");
                 Directory.CreateDirectory(dir);
             }
             catch (Exception e)
@@ -189,10 +205,12 @@ namespace Morgott.Preloader.WorldGen
             SetPaths(__instance, dir);
             __result = Load(__instance, worldSeed);
             Log.Info($"MinimapGen: client minimap cache {(__result ? "hit" : "miss")} {Path.GetFileName(dir)}");
-            if (__result) Log.Guard("MinimapGen touch", () => File.SetLastWriteTimeUtc(_paths[3](__instance), DateTime.UtcNow));
+            if (__result) Log.Guard("MinimapGen touch", TouchMeta, _paths[3](__instance));
             Trim(dir);
             return false;
         }
+
+        private static void TouchMeta(string path) => File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
 
         /// <summary>True on a foreign patch on the load / build / pixel path; then <paramref name="owned"/> (if any) goes back to
         /// the client's vanilla state (no cache paths: vanilla regenerates and saves nothing).</summary>
@@ -219,8 +237,12 @@ namespace Morgott.Preloader.WorldGen
         /// <summary>Vanilla TryLoadMinimapTextureData body without <c>Version.World.CheatCleanSlate != ZNet.World.m_worldVersion</c>.</summary>
         private static bool Load(Minimap minimap, int worldSeed)
         {
-            string[] paths = _paths.Select(p => p(minimap)).ToArray();
-            if (!paths.All(File.Exists)) return false;
+            var paths = new string[_paths.Length];
+            for (int i = 0; i < _paths.Length; i++)
+            {
+                paths[i] = _paths[i](minimap);
+                if (!File.Exists(paths[i])) return false;
+            }
             try
             {
                 byte[] value = File.ReadAllBytes(paths[3]);
@@ -251,7 +273,7 @@ namespace Morgott.Preloader.WorldGen
                 Color[] height = Utils.CompressedHalfBufferToRedChannel(File.ReadAllBytes(paths[2]));
                 if (mask.Length != count || biome.Length != count || height.Length != count)
                 {
-                    Log.Warning($"MinimapGen: cached minimap size {mask.Length}/{biome.Length}/{height.Length} != {count}, regenerated");
+                    Log.Warning($"MinimapGen: cached minimap size {mask.Length.ToString(CultureInfo.InvariantCulture)}/{biome.Length.ToString(CultureInfo.InvariantCulture)}/{height.Length.ToString(CultureInfo.InvariantCulture)} != {count.ToString(CultureInfo.InvariantCulture)}, regenerated");
                     return false;
                 }
                 Upload(minimap, mask, biome, height);
@@ -269,8 +291,8 @@ namespace Morgott.Preloader.WorldGen
         private static string Fingerprint(Minimap minimap)
         {
             var text = new StringBuilder();
-            text.Append(Schema).Append('|').Append(typeof(Minimap).Assembly.ManifestModule.ModuleVersionId).Append('|')
-                .Append(typeof(Utils).Assembly.ManifestModule.ModuleVersionId).Append('|').Append(global::Version.CurrentVersion).Append('|').Append(global::Version.c_networkVersion).Append('|')
+            text.Append(Schema).Append('|').Append(typeof(Minimap).Assembly.ManifestModule.ModuleVersionId.ToString()).Append('|')
+                .Append(typeof(Utils).Assembly.ManifestModule.ModuleVersionId.ToString()).Append('|').Append(global::Version.CurrentVersion.ToString()).Append('|').Append(global::Version.c_networkVersion).Append('|')
                 .Append((int)global::Version.c_biomeDataVersion).Append('|').Append((int)global::Version.c_CachedMinimapVersion).Append('|')
                 .Append(Application.unityVersion).Append('|').Append(minimap.m_textureSize).Append('|')
                 .Append(Bits(minimap.m_pixelSize));
@@ -285,18 +307,28 @@ namespace Morgott.Preloader.WorldGen
 
         /// <summary>Keeps the newest <see cref="KeepWorlds"/> client entries (by meta write time, touched on every hit; an
         /// entry without meta by its folder time) and never <paramref name="current"/>.</summary>
-        private static void Trim(string current)
+        private static void Trim(string current) => Log.Guard("MinimapGen trim", RunTrim, current);
+
+        private static void RunTrim(string current)
         {
-            Log.Guard("MinimapGen trim", () =>
+            DirectoryInfo[] dirs = new DirectoryInfo(_root).GetDirectories();
+            if (dirs.Length <= KeepWorlds) return;
+            Array.Sort(dirs, CompareEntryTimeDesc);
+            string currentFull = Path.GetFullPath(current).TrimEnd('\\', '/');
+            for (int i = KeepWorlds; i < dirs.Length; i++)
             {
-                foreach (DirectoryInfo old in new DirectoryInfo(_root).GetDirectories()
-                             .OrderByDescending(d => File.Exists(Path.Combine(d.FullName, MetaName)) ? File.GetLastWriteTimeUtc(Path.Combine(d.FullName, MetaName)) : d.LastWriteTimeUtc)
-                             .Skip(KeepWorlds))
-                {
-                    if (!string.Equals(old.FullName.TrimEnd('\\', '/'), Path.GetFullPath(current).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
-                        old.Delete(true);
-                }
-            });
+                DirectoryInfo old = dirs[i];
+                if (!string.Equals(old.FullName.TrimEnd('\\', '/'), currentFull, StringComparison.OrdinalIgnoreCase))
+                    old.Delete(true);
+            }
+        }
+
+        private static int CompareEntryTimeDesc(DirectoryInfo a, DirectoryInfo b) => EntryTimeUtc(b).CompareTo(EntryTimeUtc(a));
+
+        private static DateTime EntryTimeUtc(DirectoryInfo d)
+        {
+            string meta = Path.Combine(d.FullName, MetaName);
+            return File.Exists(meta) ? File.GetLastWriteTimeUtc(meta) : d.LastWriteTimeUtc;
         }
     }
 }

@@ -53,8 +53,7 @@ namespace Morgott.Preloader.Core
         {
             if (_menuReady) return;
             _menuReady = true;
-            Log.Guard("Menu ready time", () => Log.Info(string.Format(CultureInfo.InvariantCulture, "menu ready {0:F2} s after process start",
-                (DateTime.Now - Process.GetCurrentProcess().StartTime).TotalSeconds)));
+            Log.Guard("Menu ready time", () => Log.Info($"menu ready {(DateTime.Now - Process.GetCurrentProcess().StartTime).TotalSeconds.ToString("F2", CultureInfo.InvariantCulture)} s after process start"));
             Log.Guard("MenuReady handlers", () => MenuReady?.Invoke());
         }
 
@@ -98,10 +97,9 @@ namespace Morgott.Preloader.Core
             _spawned = true;
             long now = Stopwatch.GetTimestamp();
             long click = _click != 0 ? _click : _loadMainEnd;
-            Log.Info(string.Format(CultureInfo.InvariantCulture,
-                "world load {0:F2} s (click -> first spawn): click -> LoadMainScene end {1:F2} s, freeze (-> main scene loaded) {2:F2} s, -> spawn {3:F2} s",
-                Sec(click, now), Sec(click, _loadMainEnd), _mainLoaded != 0 ? Sec(_loadMainEnd, _mainLoaded) : -1,
-                _mainLoaded != 0 ? Sec(_mainLoaded, now) : -1));
+            Log.Info($"world load {Sec(click, now).ToString("F2", CultureInfo.InvariantCulture)} s (click -> first spawn): click -> LoadMainScene end {Sec(click, _loadMainEnd).ToString("F2", CultureInfo.InvariantCulture)} s, " +
+                     $"freeze (-> main scene loaded) {(_mainLoaded != 0 ? Sec(_loadMainEnd, _mainLoaded) : -1).ToString("F2", CultureInfo.InvariantCulture)} s, " +
+                     $"-> spawn {(_mainLoaded != 0 ? Sec(_mainLoaded, now) : -1).ToString("F2", CultureInfo.InvariantCulture)} s");
             Log.Guard("WorldSpawned handlers", () => WorldSpawned?.Invoke());
         }
 

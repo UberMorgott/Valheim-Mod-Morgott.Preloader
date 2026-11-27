@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Threading;
@@ -66,11 +67,13 @@ namespace Morgott.Preloader.ConfigSave
 
         private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
-            foreach (CodeInstruction code in instructions)
+            var list = new List<CodeInstruction>(instructions);
+            for (int i = 0; i < list.Count; i++)
             {
+                CodeInstruction code = list[i];
                 if (code.operand is MethodInfo called && Shims.TryGetValue(called, out MethodInfo shim)) code.operand = shim;
-                yield return code;
             }
+            return list;
         }
 
         private static void UpdatePrefix(object data, bool dispatch, out long __state)
@@ -96,8 +99,8 @@ namespace Morgott.Preloader.ConfigSave
         {
             (long real, long cached) = WatchCycleCache.Counts;
             int watchers = (_watches?.GetValue(null) as Hashtable)?.Count ?? 0;
-            Log.Info($"ConfigWatcherCache at {when}: {watchers} watchers, {_cycles} watcher scans in " +
-                     $"{Interlocked.Read(ref _ticks) * 1000.0 / Stopwatch.Frequency:F0} ms, file-system calls {real} real + {cached} shared");
+            Log.Info($"ConfigWatcherCache at {when}: {watchers.ToString(CultureInfo.InvariantCulture)} watchers, {_cycles.ToString(CultureInfo.InvariantCulture)} watcher scans in " +
+                     $"{(Interlocked.Read(ref _ticks) * 1000.0 / Stopwatch.Frequency).ToString("F0", CultureInfo.InvariantCulture)} ms, file-system calls {real.ToString(CultureInfo.InvariantCulture)} real + {cached.ToString(CultureInfo.InvariantCulture)} shared");
         }
     }
 }

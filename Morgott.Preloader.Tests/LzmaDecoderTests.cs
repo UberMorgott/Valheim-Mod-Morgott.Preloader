@@ -27,7 +27,7 @@ namespace Morgott.Preloader.Tests
         {
             var output = new MemoryStream();
             decoder = new LzmaDecoder(new MemoryStream(packed), packed.Length);
-            decoder.Decode(size, (window, offset, count) => output.Write(window, offset, count));
+            decoder.Decode(size, output.Write);
             return output.ToArray();
         }
 
@@ -51,7 +51,16 @@ namespace Morgott.Preloader.Tests
         {
             byte[] packed = Vector();
             Array.Resize(ref packed, packed.Length / 2);
-            Assert.ThrowsAny<Exception>(() => Decode(packed, Expected().Length, out _));
+            Exception caught = null;
+            try
+            {
+                Decode(packed, Expected().Length, out _);
+            }
+            catch (Exception e)
+            {
+                caught = e;
+            }
+            Assert.NotNull(caught);
         }
 
         [Fact]

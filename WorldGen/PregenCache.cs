@@ -36,7 +36,7 @@ namespace Morgott.Preloader.WorldGen
         private static MethodInfo _renderRivers;
         private static Type _riverAdd;
         private static FieldInfo[] _keyFields;
-        private static FieldInfo[] _stateFields;
+        private static AccessTools.StructFieldRef<Random.State, int>[] _stateRefs;
         private static AccessTools.FieldRef<WorldGenerator, List<Vector2>> _lakes;
         private static AccessTools.FieldRef<WorldGenerator, List<WorldGenerator.River>> _rivers;
         private static AccessTools.FieldRef<WorldGenerator, List<WorldGenerator.River>> _streams;
@@ -69,13 +69,16 @@ namespace Morgott.Preloader.WorldGen
             _riverAdd = AccessTools.Inner(typeof(WorldGenerator), "RiverAdd");
             _renderRivers = _riverAdd == null ? null : AccessTools.DeclaredMethod(typeof(WorldGenerator), "RenderRivers",
                 new[] { typeof(List<WorldGenerator.River>), _riverAdd });
-            _stateFields = new[] { "s0", "s1", "s2", "s3" }.Select(n => AccessTools.Field(typeof(Random.State), n)).ToArray();
-            if (pregenerate == null || _renderRivers == null || _stateFields.Any(f => f == null || f.FieldType != typeof(int)) ||
+            FieldInfo[] stateFields = new[] { "s0", "s1", "s2", "s3" }.Select(n => AccessTools.Field(typeof(Random.State), n)).ToArray();
+            if (pregenerate == null || _renderRivers == null || stateFields.Any(f => f == null || f.FieldType != typeof(int)) ||
                 Enum.GetUnderlyingType(_riverAdd) != typeof(int))
             {
                 Log.Warning("PregenCache: WorldGenerator.Pregenerate / RenderRivers / RiverAdd or Random.State fields not found (game or Unity update?), module off");
                 return;
             }
+            _stateRefs = new AccessTools.StructFieldRef<Random.State, int>[stateFields.Length];
+            for (int i = 0; i < stateFields.Length; i++)
+                _stateRefs[i] = AccessTools.StructFieldRefAccess<Random.State, int>(stateFields[i]);
             _lakes = AccessTools.FieldRefAccess<WorldGenerator, List<Vector2>>("m_lakes");
             _rivers = AccessTools.FieldRefAccess<WorldGenerator, List<WorldGenerator.River>>("m_rivers");
             _streams = AccessTools.FieldRefAccess<WorldGenerator, List<WorldGenerator.River>>("m_streams");
@@ -124,7 +127,7 @@ namespace Morgott.Preloader.WorldGen
             {
                 if (File.Exists(path) && TryRestore(__instance, key, path))
                 {
-                    LastResult = string.Format(CultureInfo.InvariantCulture, "hit ({0:F0} ms)", watch.Elapsed.TotalMilliseconds);
+                    LastResult = $"hit ({watch.Elapsed.TotalMilliseconds.ToString("F0", CultureInfo.InvariantCulture)} ms)";
                     Touch(path);
                     LogEndState(__instance);
                     return false;
@@ -168,8 +171,20 @@ namespace Morgott.Preloader.WorldGen
                 Log.Warning("PregenCache: Pregenerate did not end with the rendered river / stream lists (game update?), not cached");
                 return;
             }
-            ThreadPool.QueueUserWorkItem(_ => Log.Guard("PregenCache write", () => Write(capture, lakes, grid, cached)));
+            ThreadPool.QueueUserWorkItem(WriteWorker, new WriteJob(capture, lakes, grid, cached));
         }
+
+        private sealed class WriteJob(Capture capture, List<Vector2> lakes, Vector2i grid, WorldGenerator.RiverPoint[] cached)
+        {
+            public readonly Capture Capture = capture;
+            public readonly List<Vector2> Lakes = lakes;
+            public readonly Vector2i Grid = grid;
+            public readonly WorldGenerator.RiverPoint[] Cached = cached;
+        }
+
+        private static void WriteWorker(object state) => Log.Guard("PregenCache write", RunWrite, (WriteJob)state);
+
+        private static void RunWrite(WriteJob job) => Write(job.Capture, job.Lakes, job.Grid, job.Cached);
 
         private static bool SameRivers(List<WorldGenerator.River> a, List<WorldGenerator.River> b) =>
             a != null && a.Count == b.Count && a.Zip(b, ReferenceEquals).All(x => x);
@@ -187,7 +202,8 @@ namespace Morgott.Preloader.WorldGen
                 }
                 foreach ((Random.State state, List<WorldGenerator.River> rivers, int rule) in capture.Renders)
                 {
-                    foreach (FieldInfo f in _stateFields) w.Write((int)f.GetValue(state));
+                    Random.State copy = state;
+                    for (int i = 0; i < _stateRefs.Length; i++) w.Write(_stateRefs[i](ref copy));
                     w.Write(rule);
                     w.Write(rivers.Count);
                     foreach (WorldGenerator.River r in rivers)
@@ -248,8 +264,8 @@ namespace Morgott.Preloader.WorldGen
                 for (int i = 0; i < n; i++) lakes.Add(V());
                 for (int k = 0; k < 3; k++)
                 {
-                    object state = default(Random.State);
-                    foreach (FieldInfo f in _stateFields) f.SetValue(state, r.ReadInt32());
+                    Random.State state = default;
+                    for (int i = 0; i < _stateRefs.Length; i++) _stateRefs[i](ref state) = r.ReadInt32();
                     int rule = r.ReadInt32();
                     int count = r.ReadInt32();
                     var rivers = new List<WorldGenerator.River>(count);
@@ -266,7 +282,7 @@ namespace Morgott.Preloader.WorldGen
                             curveWavelength = r.ReadSingle(),
                         });
                     }
-                    renders.Add(((Random.State)state, rivers, rule));
+                    renders.Add((state, rivers, rule));
                 }
                 grid = new Vector2i(r.ReadInt32(), r.ReadInt32());
                 if (r.ReadBoolean())
@@ -311,9 +327,12 @@ namespace Morgott.Preloader.WorldGen
         private static void LogEndState(WorldGenerator generator)
         {
             if (!Verify) return;
-            Log.Guard("PregenCache state", () => Log.Info("PregenCache: state at pregeneration end " + LastResult + ": river cache " +
-                LocationsDump.RiverCacheHash(generator) + ", river points " + _riverPoints(generator).Count + " keys"));
+            Log.Guard("PregenCache state", WriteEndState, generator);
         }
+
+        private static void WriteEndState(WorldGenerator generator) =>
+            Log.Info("PregenCache: state at pregeneration end " + LastResult + ": river cache " +
+                     LocationsDump.RiverCacheHash(generator) + ", river points " + _riverPoints(generator).Count.ToString(CultureInfo.InvariantCulture) + " keys");
 
         private static bool SamePoints(WorldGenerator.RiverPoint[] a, WorldGenerator.RiverPoint[] b) =>
             a.Length == b.Length && a.Zip(b, (x, y) => x.p.x.Equals(y.p.x) && x.p.y.Equals(y.p.y) && x.w.Equals(y.w) && x.w2.Equals(y.w2)).All(e => e);
@@ -334,8 +353,20 @@ namespace Morgott.Preloader.WorldGen
         private static void Prune()
         {
             var dir = new DirectoryInfo(_dir);
-            foreach (FileInfo f in dir.GetFiles("pregen-*.bin").OrderByDescending(f => f.LastWriteTimeUtc).Skip(MaxFiles)) f.Delete();
-            foreach (FileInfo f in dir.GetFiles("pregen-*.tmp").Where(f => f.LastWriteTimeUtc < DateTime.UtcNow.AddHours(-1))) f.Delete();
+            FileInfo[] bins = dir.GetFiles("pregen-*.bin");
+            if (bins.Length > MaxFiles)
+            {
+                Array.Sort(bins, CompareLastWriteDesc);
+                for (int i = MaxFiles; i < bins.Length; i++) bins[i].Delete();
+            }
+            FileInfo[] tmps = dir.GetFiles("pregen-*.tmp");
+            DateTime cutoff = DateTime.UtcNow.AddHours(-1);
+            for (int i = 0; i < tmps.Length; i++)
+            {
+                if (tmps[i].LastWriteTimeUtc < cutoff) tmps[i].Delete();
+            }
         }
+
+        private static int CompareLastWriteDesc(FileInfo a, FileInfo b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc);
     }
 }

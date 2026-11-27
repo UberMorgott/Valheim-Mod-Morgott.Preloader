@@ -28,6 +28,14 @@ namespace Morgott.Preloader.Core
         /// <summary>First foreign patch on any of <paramref name="methods"/>, null if none.</summary>
         public static string Foreign(IEnumerable<MethodBase> methods) => methods.Select(m => Foreign(m)).FirstOrDefault(f => f != null);
 
-        private static string First(IEnumerable<Patch> patches, bool body) => patches.FirstOrDefault(p => PatchOwners.IsForeign(p.owner, body))?.owner;
+        private static string First(IReadOnlyList<Patch> patches, bool body)
+        {
+            for (int i = 0; i < patches.Count; i++)
+            {
+                string owner = patches[i].owner;
+                if (PatchOwners.IsForeign(owner, body)) return owner;
+            }
+            return null;
+        }
     }
 }

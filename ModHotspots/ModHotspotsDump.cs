@@ -32,36 +32,41 @@ namespace Morgott.Preloader.ModHotspots
                 groups[shader] = shader.name + "#" + n;
             }
             Patches info = Harmony.GetPatchInfo(AccessTools.DeclaredMethod(typeof(FejdStartup), "Awake"));
-            foreach (Patch patch in info?.Postfixes ?? new List<Patch>().AsReadOnly())
+            if (info != null)
             {
-                var gameObjects = patch.PatchMethod.Name == "ReplaceShaderPatch"
-                    ? AccessTools.DeclaredField(patch.PatchMethod.DeclaringType, "GOToSwap")?.GetValue(null) as List<GameObject>
-                    : null;
-                if (gameObjects == null) continue;
-                sb.Append("== ShaderReplacer ").Append(patch.PatchMethod.DeclaringType?.FullName)
-                  .Append(" [").Append(patch.PatchMethod.DeclaringType?.Assembly.GetName().Name).Append("] ")
-                  .Append(gameObjects.Count).Append(" objects\n");
-                for (int g = 0; g < gameObjects.Count; g++)
+                var postfixes = info.Postfixes;
+                for (int p = 0; p < postfixes.Count; p++)
                 {
-                    GameObject gameObject = gameObjects[g];
-                    foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
+                    Patch patch = postfixes[p];
+                    var gameObjects = patch.PatchMethod.Name == "ReplaceShaderPatch"
+                        ? AccessTools.DeclaredField(patch.PatchMethod.DeclaringType, "GOToSwap")?.GetValue(null) as List<GameObject>
+                        : null;
+                    if (gameObjects == null) continue;
+                    sb.Append("== ShaderReplacer ").Append(patch.PatchMethod.DeclaringType?.FullName)
+                      .Append(" [").Append(patch.PatchMethod.DeclaringType?.Assembly.GetName().Name).Append("] ")
+                      .Append(gameObjects.Count).Append(" objects\n");
+                    for (int g = 0; g < gameObjects.Count; g++)
                     {
-                        Material[] materials = renderer.sharedMaterials;
-                        for (int m = 0; m < materials.Length; m++)
+                        GameObject gameObject = gameObjects[g];
+                        foreach (Renderer renderer in gameObject.GetComponentsInChildren<Renderer>(true))
                         {
-                            Material material = materials[m];
-                            sb.Append(g).Append(' ').Append(gameObject.name).Append('/').Append(RelPath(renderer.transform, gameObject.transform))
-                              .Append(" [").Append(m).Append("] ");
-                            if (material == null)
+                            Material[] materials = renderer.sharedMaterials;
+                            for (int m = 0; m < materials.Length; m++)
                             {
-                                sb.Append("null\n");
-                                continue;
+                                Material material = materials[m];
+                                sb.Append(g).Append(' ').Append(gameObject.name).Append('/').Append(RelPath(renderer.transform, gameObject.transform))
+                                  .Append(" [").Append(m).Append("] ");
+                                if (material == null)
+                                {
+                                    sb.Append("null\n");
+                                    continue;
+                                }
+                                Shader shader = material.shader;
+                                sb.Append(material.name).Append(" -> ")
+                                  .Append(shader == null ? "null" : groups.TryGetValue(shader, out string id) ? id + "/" + counts[shader.name] : shader.name + "#?")
+                                  .Append(" rq=").Append(material.renderQueue)
+                                  .Append(" kw=").Append(string.Join(",", material.shaderKeywords)).Append('\n');
                             }
-                            Shader shader = material.shader;
-                            sb.Append(material.name).Append(" -> ")
-                              .Append(shader == null ? "null" : groups.TryGetValue(shader, out string id) ? id + "/" + counts[shader.name] : shader.name + "#?")
-                              .Append(" rq=").Append(material.renderQueue)
-                              .Append(" kw=").Append(string.Join(",", material.shaderKeywords)).Append('\n');
                         }
                     }
                 }

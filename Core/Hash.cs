@@ -10,10 +10,19 @@ namespace Morgott.Preloader.Core
 
         public static byte[] Sha256(byte[] bytes)
         {
+#if NET
+            return SHA256.HashData(bytes);
+#else
             using (SHA256 sha = SHA256.Create()) return sha.ComputeHash(bytes);
+#endif
         }
 
-        public static string Hex(byte[] bytes) => BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+        public static string Hex(byte[] bytes) =>
+#if NET
+            Convert.ToHexStringLower(bytes);
+#else
+            BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+#endif
 
         public static string Sha256Hex(byte[] bytes) => Hex(Sha256(bytes));
     }

@@ -132,15 +132,21 @@ namespace Morgott.Preloader.WorldGen
                     s.HeightMax = Mathf.Max(height, s.HeightMax);
                 }
             }
-            foreach (BiomeSector sector in d.Biomes.Values.SelectMany(b => b.Sectors).Where(s => s.EdgeCount > 0))
+            foreach (BiomeTypeInfo info in d.Biomes.Values)
             {
-                sector.Center = new Vector2(AltBiomeWorldData.MapSpaceToWorldSpace(sector.Center.x / sector.EdgeCount),
-                    AltBiomeWorldData.MapSpaceToWorldSpace(sector.Center.y / sector.EdgeCount));
-                sector.Min = new Vector2(AltBiomeWorldData.MapSpaceToWorldSpace(sector.Min.x), AltBiomeWorldData.MapSpaceToWorldSpace(sector.Min.y));
-                sector.Max = new Vector2(AltBiomeWorldData.MapSpaceToWorldSpace(sector.Max.x), AltBiomeWorldData.MapSpaceToWorldSpace(sector.Max.y));
-                sector.MinZone = ZoneSystem.GetZone(new Vector3(sector.Min.x, sector.Min.y));
-                sector.MaxZone = ZoneSystem.GetZone(new Vector3(sector.Min.x, sector.Min.y));
-                sector.HeightAvg = (sector.HeightMin + sector.HeightMax) / 2f;
+                List<BiomeSector> sectors = info.Sectors;
+                for (int s = 0; s < sectors.Count; s++)
+                {
+                    BiomeSector sector = sectors[s];
+                    if (sector.EdgeCount <= 0) continue;
+                    sector.Center = new Vector2(AltBiomeWorldData.MapSpaceToWorldSpace(sector.Center.x / sector.EdgeCount),
+                        AltBiomeWorldData.MapSpaceToWorldSpace(sector.Center.y / sector.EdgeCount));
+                    sector.Min = new Vector2(AltBiomeWorldData.MapSpaceToWorldSpace(sector.Min.x), AltBiomeWorldData.MapSpaceToWorldSpace(sector.Min.y));
+                    sector.Max = new Vector2(AltBiomeWorldData.MapSpaceToWorldSpace(sector.Max.x), AltBiomeWorldData.MapSpaceToWorldSpace(sector.Max.y));
+                    sector.MinZone = ZoneSystem.GetZone(new Vector3(sector.Min.x, sector.Min.y));
+                    sector.MaxZone = ZoneSystem.GetZone(new Vector3(sector.Min.x, sector.Min.y));
+                    sector.HeightAvg = (sector.HeightMin + sector.HeightMax) / 2f;
+                }
             }
         }
 
@@ -183,8 +189,15 @@ namespace Morgott.Preloader.WorldGen
                 }
             }
             __instance.dbStep("Loaded");
-            foreach (BiomeSector sector in __instance.Biomes.Values.SelectMany(b => b.Sectors))
-                sector.DistanceFromCenter = Vector2.Distance(sector.Center, Vector2.zero);
+            foreach (BiomeTypeInfo info in __instance.Biomes.Values)
+            {
+                List<BiomeSector> sectors = info.Sectors;
+                for (int s = 0; s < sectors.Count; s++)
+                {
+                    BiomeSector sector = sectors[s];
+                    sector.DistanceFromCenter = Vector2.Distance(sector.Center, Vector2.zero);
+                }
+            }
             __instance.dbStep("DistanceFromCenter");
             __instance.dbStep("Color");
             __instance.dbStep("Calcs");

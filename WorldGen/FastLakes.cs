@@ -48,7 +48,7 @@ namespace Morgott.Preloader.WorldGen
         /// <summary>Reverse patch: the IL of the original WorldGenerator.MergePoints (diagnostics only).</summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static List<Vector2> OriginalMergePoints(WorldGenerator instance, List<Vector2> points, float range) =>
-            throw new NotImplementedException("reverse patch stub");
+            throw new NotSupportedException("reverse patch stub");
 
         private static bool Prefix(WorldGenerator __instance, List<Vector2> points, float range, ref List<Vector2> __result, bool __runOriginal)
         {
@@ -67,11 +67,20 @@ namespace Morgott.Preloader.WorldGen
             if (result == null) return true;
             _lastTicks = watch.ElapsedTicks;
             __result = result;
-            Log.Info(string.Format(CultureInfo.InvariantCulture, "WorldGen: FastLakes merged {0} lake candidates into {1} lakes in {2:F1} ms",
-                candidates, result.Count, _lastTicks * 1000.0 / Stopwatch.Frequency));
-            if (_verify) Log.Guard("FastLakes verify", () => Verify(__instance, input, range, result));
+            Log.Info($"WorldGen: FastLakes merged {candidates.ToString(CultureInfo.InvariantCulture)} lake candidates into {result.Count.ToString(CultureInfo.InvariantCulture)} lakes in {(_lastTicks * 1000.0 / Stopwatch.Frequency).ToString("F1", CultureInfo.InvariantCulture)} ms");
+            if (_verify) Log.Guard("FastLakes verify", RunVerify, new VerifyArgs(__instance, input, range, result));
             return false;
         }
+
+        private sealed class VerifyArgs(WorldGenerator instance, List<Vector2> input, float range, List<Vector2> fast)
+        {
+            public readonly WorldGenerator Instance = instance;
+            public readonly List<Vector2> Input = input;
+            public readonly float Range = range;
+            public readonly List<Vector2> Fast = fast;
+        }
+
+        private static void RunVerify(VerifyArgs args) => Verify(args.Instance, args.Input, args.Range, args.Fast);
 
         /// <summary>Same result as WorldGenerator.MergePoints; leaves <paramref name="points"/> empty like vanilla. Null =
         /// input not supported (range or a coordinate not finite): the caller runs vanilla on the untouched list.</summary>
@@ -170,12 +179,10 @@ namespace Morgott.Preloader.WorldGen
                 List<Vector2> b = Merge(new List<Vector2>(candidates), range);
                 if (b == null || Compare(OriginalMergePoints(probe, new List<Vector2>(candidates), range), b) != 0) seedsBad++;
             }
-            string message = string.Format(CultureInfo.InvariantCulture,
-                "FastLakes verify: {0} ({1} candidates -> {2} lakes, vanilla {3:F0} ms, fast {4:F1} ms; 8 synthetic seeds: {5} different)",
-                bad == 0 && seedsBad == 0 ? "identical" : "DIFFERENT", input.Count, fast.Count, vanilla.Elapsed.TotalMilliseconds,
-                _lastTicks * 1000.0 / Stopwatch.Frequency, seedsBad);
+            string status = bad == 0 && seedsBad == 0 ? "identical" : "DIFFERENT";
+            string message = $"FastLakes verify: {status} ({input.Count.ToString(CultureInfo.InvariantCulture)} candidates -> {fast.Count.ToString(CultureInfo.InvariantCulture)} lakes, vanilla {vanilla.Elapsed.TotalMilliseconds.ToString("F0", CultureInfo.InvariantCulture)} ms, fast {(_lastTicks * 1000.0 / Stopwatch.Frequency).ToString("F1", CultureInfo.InvariantCulture)} ms; 8 synthetic seeds: {seedsBad.ToString(CultureInfo.InvariantCulture)} different)";
             if (bad == 0 && seedsBad == 0) Log.Info(message);
-            else Log.Error(message + $"; first differing index {bad - 1}");
+            else Log.Error(message + $"; first differing index {(bad - 1).ToString(CultureInfo.InvariantCulture)}");
         }
 
         /// <summary>0 = equal; else 1 + first differing index (or the shorter length).</summary>

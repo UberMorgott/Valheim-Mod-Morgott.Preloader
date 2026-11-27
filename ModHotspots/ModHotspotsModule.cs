@@ -10,10 +10,15 @@ namespace Morgott.Preloader.ModHotspots
     /// </summary>
     internal static class ModHotspotsModule
     {
+        private static Harmony _harmony;
+
         public static void Install(Harmony harmony)
         {
+            _harmony = harmony;
             if (Config.ShaderReplacerFixEnabled.Value)
-                Lifecycle.ChainloaderStarted += () => Log.Guard("ModHotspots ShaderReplacer", () => ShaderReplacerFix.Install(harmony));
+                Lifecycle.ChainloaderStarted += () => Log.Guard("ModHotspots ShaderReplacer", InstallShaderReplacer);
         }
+
+        private static void InstallShaderReplacer() => ShaderReplacerFix.Install(_harmony);
     }
 }

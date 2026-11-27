@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -52,10 +53,10 @@ namespace Morgott.Preloader.Profiling
             _harmony = harmony;
             _prefix = new HarmonyMethod(AccessTools.Method(typeof(PatchOwnerProbe), nameof(Prefix)), Priority.First);
             _finalizer = new HarmonyMethod(AccessTools.Method(typeof(PatchOwnerProbe), nameof(Finalizer)), Priority.Last);
-            Log.Info($"Patch owner probe: {Scan()} mod patch methods on game startup/world-load methods and Jotunn event handlers timed, {_skip.Count} skipped");
+            Log.Info($"Patch owner probe: {Scan().ToString(CultureInfo.InvariantCulture)} mod patch methods on game startup/world-load methods and Jotunn event handlers timed, {_skip.Count.ToString(CultureInfo.InvariantCulture)} skipped");
             // Patches and Jotunn subscriptions added after Chainloader.Start (plugin Start, menu code) are picked up
             // at the main menu, before any world load.
-            GameLifecycleProbe.MenuReady += () => Log.Info($"Patch owner probe: {Scan()} more mod patch methods / Jotunn handlers timed at the main menu");
+            GameLifecycleProbe.MenuReady += () => Log.Info($"Patch owner probe: {Scan().ToString(CultureInfo.InvariantCulture)} more mod patch methods / Jotunn handlers timed at the main menu");
         }
 
         /// <summary>Native-crash guard of a wrapping pass: <c>&lt;name&gt;.pending</c> left by a launch that died while
@@ -96,24 +97,42 @@ namespace Morgott.Preloader.Profiling
 
         private static int Scan()
         {
-            int wrapped = 0;
-            foreach (MethodInfo target in GameLifecycleProbe.Targets().Concat(GameLifecycleProbe.WorldTargets()).Where(m => m != null))
-            {
-                Patches info = Harmony.GetPatchInfo(target);
-                if (info == null) continue;
-                foreach (Patch patch in info.Prefixes.Concat(info.Postfixes).Concat(info.Finalizers))
-                {
-                    // Morgott.Preloader's own patches stay unwrapped, except WorldGen: its prefixes replace vanilla bodies
-                    // (parallel GenerateBiomePoints), so without a name their time read as "untimed mod patches".
-                    bool own = patch.owner.StartsWith(PatchGuard.OwnPrefix, StringComparison.Ordinal) && patch.owner != PreloaderPatcher.WorldGenHarmonyId;
-                    if (!own && Wrap(patch.PatchMethod, patch.owner, target.DeclaringType?.Name + "." + target.Name)) wrapped++;
-                }
-            }
+            int wrapped = ScanTargets(GameLifecycleProbe.Targets()) + ScanTargets(GameLifecycleProbe.WorldTargets());
             foreach ((MethodInfo method, string eventName) in JotunnEventSubscribers())
             {
                 if (Wrap(method, "Jotunn event handler", "Jotunn " + eventName)) wrapped++;
             }
             File.Delete(_pendingPath);
+            return wrapped;
+        }
+
+        private static int ScanTargets(MethodInfo[] targets)
+        {
+            int wrapped = 0;
+            for (int i = 0; i < targets.Length; i++)
+            {
+                MethodInfo target = targets[i];
+                if (target == null) continue;
+                Patches info = Harmony.GetPatchInfo(target);
+                if (info == null) continue;
+                wrapped += ScanPatches(info.Prefixes, target);
+                wrapped += ScanPatches(info.Postfixes, target);
+                wrapped += ScanPatches(info.Finalizers, target);
+            }
+            return wrapped;
+        }
+
+        private static int ScanPatches(IReadOnlyList<Patch> patches, MethodInfo target)
+        {
+            int wrapped = 0;
+            for (int i = 0; i < patches.Count; i++)
+            {
+                Patch patch = patches[i];
+                // Morgott.Preloader's own patches stay unwrapped, except WorldGen: its prefixes replace vanilla bodies
+                // (parallel GenerateBiomePoints), so without a name their time read as "untimed mod patches".
+                bool own = patch.owner.StartsWith(PatchGuard.OwnPrefix, StringComparison.Ordinal) && patch.owner != PreloaderPatcher.WorldGenHarmonyId;
+                if (!own && Wrap(patch.PatchMethod, patch.owner, target.DeclaringType?.Name + "." + target.Name)) wrapped++;
+            }
             return wrapped;
         }
 

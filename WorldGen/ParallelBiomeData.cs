@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,6 +38,14 @@ namespace Morgott.Preloader.WorldGen
             public AltBiomeWorldData Data;
             public bool Sectors;
             public Task Task;
+
+            public void Run()
+            {
+                Parallel.For(0, AltBiomeWorldData.c_textureSize, RunRow);
+                if (Sectors) PrefetchedSectors.Build(Data);
+            }
+
+            public void RunRow(int i) => Row(Generator, Data, i);
         }
 
         public static void Install(Harmony harmony, bool prefetch, bool sectors)
@@ -86,18 +95,15 @@ namespace Morgott.Preloader.WorldGen
             NormalizeRiverCache(generator);
             var data = new AltBiomeWorldData(AltBiomeWorldData.c_textureSize);
             bool sectors = _sectors && PrefetchedSectors.Allowed();
-            _prefetch = new Prefetch
+            var prefetch = new Prefetch
             {
                 Generator = generator,
                 World = world,
                 Data = data,
                 Sectors = sectors,
-                Task = Task.Run(() =>
-                {
-                    Parallel.For(0, AltBiomeWorldData.c_textureSize, i => Row(generator, data, i));
-                    if (sectors) PrefetchedSectors.Build(data);
-                }),
             };
+            prefetch.Task = Task.Run(prefetch.Run);
+            _prefetch = prefetch;
         }
 
         private static string Foreign() => PatchGuard.Foreign(_target, bodyOnly: true) ?? PatchGuard.Foreign(GeneratorPath.Methods);
@@ -127,7 +133,8 @@ namespace Morgott.Preloader.WorldGen
                 NormalizeRiverCache(generator);
                 try
                 {
-                    Parallel.For(0, AltBiomeWorldData.c_textureSize, i => Row(generator, data, i));
+                    var job = new Prefetch { Generator = generator, Data = data };
+                    Parallel.For(0, AltBiomeWorldData.c_textureSize, job.RunRow);
                 }
                 catch (Exception e)
                 {
@@ -188,7 +195,7 @@ namespace Morgott.Preloader.WorldGen
                 Vector2i grid = CachedGrid(generator);
                 RiverPoints(generator).TryGetValue(grid, out WorldGenerator.RiverPoint[] current);
                 if (ReferenceEquals(CachedPoints(generator), current)) return;
-                Log.InfoOnce("river-cache-normalized", $"ParallelBiomeData: river cache of grid {grid.x},{grid.y} held a superseded array, refreshed before the parallel build");
+                Log.InfoOnce("river-cache-normalized", $"ParallelBiomeData: river cache of grid {grid.x.ToString(CultureInfo.InvariantCulture)},{grid.y.ToString(CultureInfo.InvariantCulture)} held a superseded array, refreshed before the parallel build");
                 CachedPoints(generator) = current;
             }
             finally

@@ -15,13 +15,34 @@ namespace Morgott.Preloader.Profiling
     /// </summary>
     internal static class DetourSafety
     {
-        internal static bool EndsInHandler(MethodBody body) =>
-            EndsInHandler(body.GetILAsByteArray().Length,
-                body.ExceptionHandlingClauses.SelectMany(c => new[] { (c.HandlerOffset, c.HandlerLength), (c.TryOffset, c.TryLength) }));
+        internal static bool EndsInHandler(MethodBody body)
+        {
+            int ilLength = body.GetILAsByteArray().Length;
+            IList<ExceptionHandlingClause> clauses = body.ExceptionHandlingClauses;
+            for (int i = 0; i < clauses.Count; i++)
+            {
+                ExceptionHandlingClause c = clauses[i];
+                if (c.HandlerOffset + c.HandlerLength >= ilLength || c.TryOffset + c.TryLength >= ilLength)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         /// <summary>True when a protected region (handler, or a try block placed after its handler) reaches the end of the
         /// method's IL (<paramref name="ilLength"/> bytes): the appended ret would land inside it.</summary>
-        internal static bool EndsInHandler(int ilLength, IEnumerable<(int Offset, int Length)> handlers) =>
-            handlers.Any(h => h.Offset + h.Length >= ilLength);
+        internal static bool EndsInHandler(int ilLength, IReadOnlyList<(int Offset, int Length)> handlers)
+        {
+            for (int i = 0; i < handlers.Count; i++)
+            {
+                (int offset, int length) = handlers[i];
+                if (offset + length >= ilLength)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 }

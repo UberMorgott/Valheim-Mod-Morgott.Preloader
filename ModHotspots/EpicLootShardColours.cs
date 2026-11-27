@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -36,18 +37,20 @@ namespace Morgott.Preloader.ModHotspots
             if (args.LoadedAssembly.GetName().Name != AssemblyName) return;
             AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
             // Raised inside BepInEx's Assembly.LoadFile: an install failure must not fail Epic Loot's load.
-            Log.Guard("EpicLoot shard colours", () =>
+            Log.Guard("EpicLoot shard colours", PatchAssembly, args.LoadedAssembly);
+        }
+
+        private static void PatchAssembly(Assembly assembly)
+        {
+            var target = AccessTools.Method(assembly.GetType("EpicLoot.ShardStones.Shards"), "CreateAndLoadShardItems");
+            _logErrorForce = AccessTools.Method(assembly.GetType("EpicLoot.EpicLoot"), "LogErrorForce", new[] { typeof(string) });
+            if (target == null || _logErrorForce == null)
             {
-                var target = AccessTools.Method(args.LoadedAssembly.GetType("EpicLoot.ShardStones.Shards"), "CreateAndLoadShardItems");
-                _logErrorForce = AccessTools.Method(args.LoadedAssembly.GetType("EpicLoot.EpicLoot"), "LogErrorForce", new[] { typeof(string) });
-                if (target == null || _logErrorForce == null)
-                {
-                    Log.Warning("EpicLoot shard colours: Shards.CreateAndLoadShardItems / EpicLoot.LogErrorForce not found; fix off.");
-                    return;
-                }
-                new Harmony(HarmonyId).Patch(target, postfix: new HarmonyMethod(typeof(EpicLootShardColours), nameof(Report)),
-                    transpiler: new HarmonyMethod(typeof(EpicLootShardColours), nameof(Transpiler)));
-            });
+                Log.Warning("EpicLoot shard colours: Shards.CreateAndLoadShardItems / EpicLoot.LogErrorForce not found; fix off.");
+                return;
+            }
+            new Harmony(HarmonyId).Patch(target, postfix: new HarmonyMethod(typeof(EpicLootShardColours), nameof(Report)),
+                transpiler: new HarmonyMethod(typeof(EpicLootShardColours), nameof(Transpiler)));
         }
 
         /// <summary>The method's single <c>EpicLoot.LogErrorForce(string)</c> call -> <see cref="Skip"/>; any other count = unchanged.</summary>
@@ -57,7 +60,7 @@ namespace Morgott.Preloader.ModHotspots
             var calls = code.Where(c => c.Calls(_logErrorForce)).ToList();
             if (calls.Count != 1)
             {
-                Log.Warning($"EpicLoot shard colours: {calls.Count} LogErrorForce calls in CreateAndLoadShardItems (expected 1); fix off.");
+                Log.Warning($"EpicLoot shard colours: {calls.Count.ToString(CultureInfo.InvariantCulture)} LogErrorForce calls in CreateAndLoadShardItems (expected 1); fix off.");
                 return code;
             }
             calls[0].opcode = OpCodes.Call;
@@ -76,7 +79,7 @@ namespace Morgott.Preloader.ModHotspots
         private static void Report()
         {
             if (Skipped.Count == 0) return;
-            Log.Info($"[EpicLootFixes] {Skipped.Count} Epic Loot shard colour(s) removed by Morgott.EpicLoot patch 96, no items made: {string.Join(", ", Skipped)}.");
+            Log.Info($"[EpicLootFixes] {Skipped.Count.ToString(CultureInfo.InvariantCulture)} Epic Loot shard colour(s) removed by Morgott.EpicLoot patch 96, no items made: {string.Join(", ", Skipped)}.");
             Skipped.Clear();
         }
     }

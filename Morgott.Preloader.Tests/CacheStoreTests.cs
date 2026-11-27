@@ -37,7 +37,7 @@ namespace Morgott.Preloader.Tests
             Assert.True(Directory.Exists(_store.Dir));
             Assert.Equal(Path.Combine(Path.GetFullPath(_root), "v1-6000.0_x_y"), CacheStore.DirFor(_root, "6000.0 x/y"));
             Assert.Equal(Path.Combine(Path.GetFullPath(_root), "v1-unknown"), CacheStore.DirFor(_root, null));
-            Assert.Equal("a.bundle." + Process.GetCurrentProcess().Id + ".src.tmp", CacheStore.TempOf("a.bundle", "src"));
+            Assert.Equal("a.bundle." + Environment.ProcessId + ".src.tmp", CacheStore.TempOf("a.bundle", "src"));
         }
 
         [Fact]

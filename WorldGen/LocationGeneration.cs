@@ -148,20 +148,36 @@ namespace Morgott.Preloader.WorldGen
                     return true;
             }
             BiomeSector sector = generator.GetBiomeSector(p);
+            List<AltBiome> altBiomes = sector.AltBiomes;
             string parent = location.AltBiomeParent;
-            if (parent != null && !sector.AltBiomes.Any(x => x.m_name == parent)) return true;
-            return sector.AltBiomes.Any(x => x.m_blockLocationNames.Contains(location.m_name));
+            if (parent != null)
+            {
+                bool hasParent = false;
+                for (int i = 0; i < altBiomes.Count; i++)
+                {
+                    if (altBiomes[i].m_name == parent)
+                    {
+                        hasParent = true;
+                        break;
+                    }
+                }
+                if (!hasParent) return true;
+            }
+            for (int i = 0; i < altBiomes.Count; i++)
+            {
+                if (altBiomes[i].m_blockLocationNames.Contains(location.m_name)) return true;
+            }
+            return false;
         }
 
         /// <summary>Log line (and per-run reset) at LocationsGenerated; null when no location was generated.</summary>
         public static string TakeSummary()
         {
             if (_locations == 0) return null;
-            string line = string.Format(CultureInfo.InvariantCulture,
-                "{0} location types in {1:F0} ms wall ({2:F0} ms in generation steps); {3} terrain-delta calls, {4} rejected by the delta, " +
-                "{5} skipped by EarlyReject{6}",
-                _locations, StartupTrace.DurMs(_firstStart, Stopwatch.GetTimestamp()), _busyTicks * 1000.0 / Stopwatch.Frequency,
-                _reachDelta, _deltaRejects, _earlyRejects, _earlyOff > 0 ? $" ({_earlyOff} types with no finite max delta not eligible)" : "");
+            string notEligible = _earlyOff > 0 ? $" ({_earlyOff.ToString(CultureInfo.InvariantCulture)} types with no finite max delta not eligible)" : "";
+            string line = $"{_locations.ToString(CultureInfo.InvariantCulture)} location types in {StartupTrace.DurMs(_firstStart, Stopwatch.GetTimestamp()).ToString("F0", CultureInfo.InvariantCulture)} ms wall ({(_busyTicks * 1000.0 / Stopwatch.Frequency).ToString("F0", CultureInfo.InvariantCulture)} ms in generation steps); " +
+                          $"{_reachDelta.ToString(CultureInfo.InvariantCulture)} terrain-delta calls, {_deltaRejects.ToString(CultureInfo.InvariantCulture)} rejected by the delta, " +
+                          $"{_earlyRejects.ToString(CultureInfo.InvariantCulture)} skipped by EarlyReject{notEligible}";
             _locations = _earlyOff = 0;
             _busyTicks = _reachDelta = _deltaRejects = _earlyRejects = 0;
             return line;
@@ -227,9 +243,8 @@ namespace Morgott.Preloader.WorldGen
                 _deltaRejects += DeltaRejects;
                 _earlyRejects += EarlyRejects;
                 if (!StartupTrace.Recording) return;
-                StartupTrace.Complete("worldgen", Location.m_prefab.name, _start, end, string.Format(CultureInfo.InvariantCulture,
-                        "busy {0:F1} ms, {1} terrain-delta calls, {2} delta rejects, {3} early rejects{4}",
-                        _busy * 1000.0 / Stopwatch.Frequency, ReachDelta, DeltaRejects, EarlyRejects, EarlyReject ? "" : " (EarlyReject not used)"),
+                StartupTrace.Complete("worldgen", Location.m_prefab.name, _start, end,
+                    $"busy {(_busy * 1000.0 / Stopwatch.Frequency).ToString("F1", CultureInfo.InvariantCulture)} ms, {ReachDelta.ToString(CultureInfo.InvariantCulture)} terrain-delta calls, {DeltaRejects.ToString(CultureInfo.InvariantCulture)} delta rejects, {EarlyRejects.ToString(CultureInfo.InvariantCulture)} early rejects{(EarlyReject ? "" : " (EarlyReject not used)")}",
                     tid: StartupTrace.LaneWorldGen);
             }
         }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using BepInEx;
 using BepInEx.Bootstrap;
 using BepInEx.Logging;
@@ -70,22 +71,24 @@ namespace Morgott.Preloader.Profiling
         private static void StartFinalizer(long __state)
         {
             long end = StartupTrace.Now();
-            Log.Guard("Plugin profiler detach", () =>
-            {
-                Logger.Listeners.Remove(Instance);
-                ClosePlugin(end);
-                var guids = new Dictionary<string, string>();
-                foreach (KeyValuePair<string, PluginInfo> kv in Chainloader.PluginInfos) guids[kv.Value.ToString()] = kv.Key;
-                foreach (TraceEvent e in Pending)
-                {
-                    if (guids.TryGetValue(e.Detail, out string guid)) e.Name = guid;
-                    StartupTrace.Complete(e.Cat, e.Name, e.Start, e.End, e.Detail, e.Detail2);
-                }
-                Pending.Clear();
-                StartupTrace.Complete("lifecycle", "Chainloader.Start", __state, end, $"{Chainloader.PluginInfos.Count} plugins");
-            });
+            Log.Guard("Plugin profiler detach", DetachAndFlush, (__state, end));
             StartupTrace.Mark("Chainloader.Start end");
             Log.Guard("ChainloaderStarted handlers", () => ChainloaderStarted?.Invoke());
+        }
+
+        private static void DetachAndFlush((long Start, long End) span)
+        {
+            Logger.Listeners.Remove(Instance);
+            ClosePlugin(span.End);
+            var guids = new Dictionary<string, string>();
+            foreach (KeyValuePair<string, PluginInfo> kv in Chainloader.PluginInfos) guids[kv.Value.ToString()] = kv.Key;
+            foreach (TraceEvent e in Pending)
+            {
+                if (guids.TryGetValue(e.Detail, out string guid)) e.Name = guid;
+                StartupTrace.Complete(e.Cat, e.Name, e.Start, e.End, e.Detail, e.Detail2);
+            }
+            Pending.Clear();
+            StartupTrace.Complete("lifecycle", "Chainloader.Start", span.Start, span.End, $"{Chainloader.PluginInfos.Count.ToString(CultureInfo.InvariantCulture)} plugins");
         }
 
         private static void ClosePlugin(long end)

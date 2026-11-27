@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using Morgott.Preloader.Core;
 using HarmonyLib;
@@ -49,7 +50,7 @@ namespace Morgott.Preloader.Translations
                 prefix: new HarmonyMethod(AccessTools.Method(typeof(LocalizationCache), nameof(LoadPrefix)), Priority.Last),
                 postfix: new HarmonyMethod(AccessTools.Method(typeof(LocalizationCache), nameof(LoadPostfix)), Priority.First),
                 finalizer: new HarmonyMethod(AccessTools.Method(typeof(LocalizationCache), nameof(LoadFinalizer))));
-            Lifecycle.MenuReady += () => Log.Info($"LocalizationCache: {_misses} CSV loads parsed, {_hits} replayed until the main menu");
+            Lifecycle.MenuReady += () => Log.Info($"LocalizationCache: {_misses.ToString(CultureInfo.InvariantCulture)} CSV loads parsed, {_hits.ToString(CultureInfo.InvariantCulture)} replayed until the main menu");
         }
 
         /// <summary>Last prefix, so earlier prefixes that skip the original are seen through <c>__runOriginal</c>.</summary>

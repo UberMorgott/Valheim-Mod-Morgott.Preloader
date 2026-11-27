@@ -44,5 +44,18 @@ namespace Morgott.Preloader.Core
                 Error($"{where} failed: {e}");
             }
         }
+
+        /// <summary>State-passing overload of <see cref="Guard(string, Action)"/> to avoid closure allocations.</summary>
+        public static void Guard<T>(string where, Action<T> action, T state)
+        {
+            try
+            {
+                action(state);
+            }
+            catch (Exception e)
+            {
+                Error($"{where} failed: {e}");
+            }
+        }
     }
 }

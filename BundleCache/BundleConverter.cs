@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using static Morgott.Preloader.BundleCache.BundleHeader;
@@ -46,7 +47,7 @@ internal static class BundleConverter
         }
         if ((h.Flags & ~KnownFlags) != 0 || h.Version < 6 || h.Version > 8 || h.Size != stream.Length || h.Table > MaxTableSize || h.PackedTable > MaxTableSize)
         {
-            problem = $"unsupported header (version {h.Version}, flags 0x{h.Flags:x}, size {h.Size}/{stream.Length})";
+            problem = $"unsupported header (version {h.Version.ToString(CultureInfo.InvariantCulture)}, flags 0x{h.Flags.ToString("x", CultureInfo.InvariantCulture)}, size {h.Size.ToString(CultureInfo.InvariantCulture)}/{stream.Length.ToString(CultureInfo.InvariantCulture)})";
             return null;
         }
         byte[] packed = ReadTable(stream, h, 0);
@@ -58,12 +59,10 @@ internal static class BundleConverter
                 break;
             case 1:
                 info = new byte[h.Table];
-                int at = 0;
-                new LzmaDecoder(new MemoryStream(packed), h.PackedTable).Decode(h.Table, (b, o, c) =>
+                using (var tableOut = new MemoryStream(info))
                 {
-                    Buffer.BlockCopy(b, o, info, at, c);
-                    at += c;
-                });
+                    new LzmaDecoder(new MemoryStream(packed), h.PackedTable).Decode(h.Table, tableOut.Write);
+                }
                 break;
             case 2:
             case 3:
@@ -182,12 +181,12 @@ internal static class BundleConverter
             file.WriteByte(0);
         }
         // Data: every source block decoded in order; output is written as it is produced.
-        long written = 0;
+        var sink = new BlockWriteSink(file, progress);
         long blockAt = s.DataStart;
         for (int i = 0; i < s.BlockUncompressed.Length; i++)
         {
             input.Position = blockAt;
-            long before = written;
+            long before = sink.Written;
             switch (s.BlockFlags[i] & CompressionMask)
             {
                 case 0:
@@ -201,16 +200,11 @@ internal static class BundleConverter
                         }
                         file.Write(buffer, 0, (int)n);
                     }
-                    written += s.BlockUncompressed[i];
+                    sink.Written += s.BlockUncompressed[i];
                     break;
                 case 1:
                     var lzma = new LzmaDecoder(input, s.BlockCompressed[i]);
-                    lzma.Decode(s.BlockUncompressed[i], (b, offset, count) =>
-                    {
-                        file.Write(b, offset, count);
-                        written += count;
-                        progress?.Invoke(written);
-                    });
+                    lzma.Decode(s.BlockUncompressed[i], sink.Write);
                     if (!lzma.EndsCleanly())
                     {
                         throw new InvalidDataException("LZMA block does not end cleanly at its unpacked size");
@@ -219,17 +213,17 @@ internal static class BundleConverter
                 default:
                     byte[] plain = Lz4Block.Decode(Bytes(input, (int)s.BlockCompressed[i]), (int)s.BlockUncompressed[i]);
                     file.Write(plain, 0, plain.Length);
-                    written += plain.Length;
+                    sink.Written += plain.Length;
                     break;
             }
-            if (written - before != s.BlockUncompressed[i])
+            if (sink.Written - before != s.BlockUncompressed[i])
             {
                 throw new InvalidDataException("block decoded to a different size");
             }
             blockAt += s.BlockCompressed[i];
-            progress?.Invoke(written);
+            progress?.Invoke(sink.Written);
         }
-        if (written != s.DataSize)
+        if (sink.Written != s.DataSize)
         {
             throw new InvalidDataException("data size mismatch");
         }
@@ -249,6 +243,26 @@ internal static class BundleConverter
         file.Position = sizeAt;
         Put64(file, total);
         file.Flush(true);
+    }
+
+    private sealed class BlockWriteSink
+    {
+        private readonly FileStream _file;
+        private readonly Action<long> _progress;
+        public long Written;
+
+        public BlockWriteSink(FileStream file, Action<long> progress)
+        {
+            _file = file;
+            _progress = progress;
+        }
+
+        public void Write(byte[] b, int offset, int count)
+        {
+            _file.Write(b, offset, count);
+            Written += count;
+            _progress?.Invoke(Written);
+        }
     }
 
     private static void PutCString(Stream s, string text)

@@ -20,27 +20,43 @@ namespace Morgott.Preloader.WorldGen
         private static long _sectorsStart;
         private static long _sectorsTicks;
         private static bool _dump;
+        private static bool _early;
+        private static float _budget;
 
         public static void Install(Harmony harmony, bool profiler)
         {
             bool parallel = Config.ParallelBiomeData.Value;
-            bool early = Config.EarlyReject.Value;
-            float budget = Config.LoadingTimeBudget.Value;
+            _early = Config.EarlyReject.Value;
+            _budget = Config.LoadingTimeBudget.Value;
             _dump = Config.DumpLocations.Value;
-            if (parallel) Log.Guard("ParallelBiomeData install", () => ParallelBiomeData.Install(harmony, Config.PrefetchBiomeData.Value, Config.PrefetchSectors.Value));
+            if (parallel) Log.Guard("ParallelBiomeData install", InstallParallelBiomeData, harmony);
             if (Config.PregenCache.Value)
             {
                 PregenCache.Verify = _dump;
-                Log.Guard("PregenCache install", () => PregenCache.Install(harmony));
+                Log.Guard("PregenCache install", PregenCache.Install, harmony);
             }
-            if (Config.FastLakes.Value) Log.Guard("FastLakes install", () => FastLakes.Install(harmony, _dump));
+            if (Config.FastLakes.Value) Log.Guard("FastLakes install", InstallFastLakes, harmony);
             if (Config.ParallelMinimap.Value || Config.ClientMinimapCache.Value)
-                Log.Guard("MinimapGen install", () => MinimapGen.Install(harmony, Config.ParallelMinimap.Value, Config.ClientMinimapCache.Value));
-            if (early || profiler) Log.Guard("Location generation hooks install", () => LocationGeneration.Install(harmony, early));
-            if (budget > 0f) Log.Guard("LoadingTimeBudget install", () => LoadingTimeBudget.Install(harmony, budget));
-            Log.Guard("WorldGen timing hooks install", () => InstallTiming(harmony));
-            Log.Info($"WorldGen: ParallelBiomeData={parallel}, PrefetchBiomeData={parallel && Config.PrefetchBiomeData.Value}, FastLakes={Config.FastLakes.Value}, PregenCache={Config.PregenCache.Value}, PrefetchSectors={parallel && Config.PrefetchBiomeData.Value && Config.PrefetchSectors.Value}, ParallelMinimap={Config.ParallelMinimap.Value}, ClientMinimapCache={Config.ClientMinimapCache.Value}, EarlyReject={early}, LoadingTimeBudget={budget.ToString(CultureInfo.InvariantCulture)}, DumpLocations={_dump}");
+                Log.Guard("MinimapGen install", InstallMinimapGen, harmony);
+            if (_early || profiler) Log.Guard("Location generation hooks install", InstallLocationGeneration, harmony);
+            if (_budget > 0f) Log.Guard("LoadingTimeBudget install", InstallLoadingTimeBudget, harmony);
+            Log.Guard("WorldGen timing hooks install", InstallTiming, harmony);
+            bool prefetchBiome = parallel && Config.PrefetchBiomeData.Value;
+            bool prefetchSectors = prefetchBiome && Config.PrefetchSectors.Value;
+            Log.Info($"WorldGen: ParallelBiomeData={parallel.ToString()}, PrefetchBiomeData={prefetchBiome.ToString()}, FastLakes={Config.FastLakes.Value.ToString()}, PregenCache={Config.PregenCache.Value.ToString()}, PrefetchSectors={prefetchSectors.ToString()}, ParallelMinimap={Config.ParallelMinimap.Value.ToString()}, ClientMinimapCache={Config.ClientMinimapCache.Value.ToString()}, EarlyReject={_early.ToString()}, LoadingTimeBudget={_budget.ToString(CultureInfo.InvariantCulture)}, DumpLocations={_dump.ToString()}");
         }
+
+        private static void InstallParallelBiomeData(Harmony harmony) =>
+            ParallelBiomeData.Install(harmony, Config.PrefetchBiomeData.Value, Config.PrefetchSectors.Value);
+
+        private static void InstallFastLakes(Harmony harmony) => FastLakes.Install(harmony, _dump);
+
+        private static void InstallMinimapGen(Harmony harmony) =>
+            MinimapGen.Install(harmony, Config.ParallelMinimap.Value, Config.ClientMinimapCache.Value);
+
+        private static void InstallLocationGeneration(Harmony harmony) => LocationGeneration.Install(harmony, _early);
+
+        private static void InstallLoadingTimeBudget(Harmony harmony) => LoadingTimeBudget.Install(harmony, _budget);
 
         private static void InstallTiming(Harmony harmony)
         {
@@ -80,13 +96,14 @@ namespace Morgott.Preloader.WorldGen
             if (_verifyStart == 0) return;
             long total = Stopwatch.GetTimestamp() - _verifyStart;
             _verifyStart = 0;
-            Log.Info(string.Format(CultureInfo.InvariantCulture,
-                "WorldGen: VerifyBiomeData {0:F0} ms (GenerateBiomePoints {1:F0} ms {2}, GenerateSectors {3:F0} ms{6}) world '{4}', pregeneration {5}",
-                Ms(total), Ms(_pointsTicks), ParallelBiomeData.LastParallel ? (ParallelBiomeData.LastPrefetched ? "prefetched" : "parallel") : "vanilla",
-                Ms(_sectorsTicks), world?.m_name, PregenCache.LastResult.Length > 0 ? PregenCache.LastResult : "not cached",
-                PrefetchedSectors.LastUsed ? " prefetched" : ""));
-            if (_dump) Log.Guard("WorldGen state hashes", () => Log.Info("WorldGen: state " + LocationsDump.StateHashes(world)));
+            string mode = ParallelBiomeData.LastParallel ? (ParallelBiomeData.LastPrefetched ? "prefetched" : "parallel") : "vanilla";
+            string pregen = PregenCache.LastResult.Length > 0 ? PregenCache.LastResult : "not cached";
+            string sectorsTag = PrefetchedSectors.LastUsed ? " prefetched" : "";
+            Log.Info($"WorldGen: VerifyBiomeData {Ms(total).ToString("F0", CultureInfo.InvariantCulture)} ms (GenerateBiomePoints {Ms(_pointsTicks).ToString("F0", CultureInfo.InvariantCulture)} ms {mode}, GenerateSectors {Ms(_sectorsTicks).ToString("F0", CultureInfo.InvariantCulture)} ms{sectorsTag}) world '{world?.m_name}', pregeneration {pregen}");
+            if (_dump) Log.Guard("WorldGen state hashes", LogStateHashes, world);
         }
+
+        private static void LogStateHashes(World world) => Log.Info("WorldGen: state " + LocationsDump.StateHashes(world));
 
         private static void PointsPrefix() => _pointsStart = Stopwatch.GetTimestamp();
 
@@ -101,7 +118,7 @@ namespace Morgott.Preloader.WorldGen
             if (!value) return;
             string summary = LocationGeneration.TakeSummary();
             if (summary != null) Log.Info("WorldGen: " + summary);
-            if (_dump) Log.Guard("WorldGen locations dump", () => LocationsDump.Write(__instance));
+            if (_dump) Log.Guard("WorldGen locations dump", LocationsDump.Write, __instance);
         }
 
         private static double Ms(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;

@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using BepInEx;
 using HarmonyLib;
@@ -24,21 +25,36 @@ namespace Morgott.Preloader.Core
         private static void Write()
         {
             var lines = new List<string>();
-            foreach (MethodBase method in Harmony.GetAllPatchedMethods())
+            var methods = new List<MethodBase>(Harmony.GetAllPatchedMethods());
+            for (int i = 0; i < methods.Count; i++)
             {
+                MethodBase method = methods[i];
                 Patches info = Harmony.GetPatchInfo(method);
                 if (info == null) continue;
-                string patches = Kind("prefix", info.Prefixes) + Kind("postfix", info.Postfixes) + Kind("transpiler", info.Transpilers) +
-                                 Kind("finalizer", info.Finalizers) + Kind("ilmanipulator", info.ILManipulators);
-                if (patches.Length > 0) lines.Add(AutoId.Replace(method.FullDescription() + "\n" + patches, "harmony-auto-*"));
+                var sb = new StringBuilder();
+                AppendKind(sb, "prefix", info.Prefixes);
+                AppendKind(sb, "postfix", info.Postfixes);
+                AppendKind(sb, "transpiler", info.Transpilers);
+                AppendKind(sb, "finalizer", info.Finalizers);
+                AppendKind(sb, "ilmanipulator", info.ILManipulators);
+                if (sb.Length > 0) lines.Add(AutoId.Replace(method.FullDescription() + "\n" + sb.ToString(), "harmony-auto-*"));
             }
             lines.Sort(StringComparer.Ordinal);
             string path = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "harmony-state.txt");
             AtomicFile.WriteAllText(path, string.Concat(lines));
-            Log.Info($"Harmony state: {lines.Count} patched methods written to {path}");
+            Log.Info($"Harmony state: {lines.Count.ToString(CultureInfo.InvariantCulture)} patched methods written to {path}");
         }
 
-        private static string Kind(string kind, IEnumerable<Patch> patches) => string.Concat(patches.Where(p => !PatchGuard.IsOwn(p.owner))
-            .Select(p => "  " + kind + " " + p.owner + " prio=" + p.priority + " " + p.PatchMethod.FullDescription() + "\n"));
+        private static void AppendKind(StringBuilder sb, string kind, IReadOnlyList<Patch> patches)
+        {
+            for (int i = 0; i < patches.Count; i++)
+            {
+                Patch p = patches[i];
+                if (PatchGuard.IsOwn(p.owner)) continue;
+                sb.Append("  ").Append(kind).Append(' ').Append(p.owner).Append(" prio=")
+                  .Append(p.priority.ToString(CultureInfo.InvariantCulture)).Append(' ')
+                  .Append(p.PatchMethod.FullDescription()).Append('\n');
+            }
+        }
     }
 }

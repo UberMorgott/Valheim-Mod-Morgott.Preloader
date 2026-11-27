@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -65,6 +64,13 @@ namespace Morgott.Preloader.Profiling
             }
         }
 
+        private sealed class OwnerAgg
+        {
+            public string Owner;
+            public long SpikeSelf, SpikeHook, PlayTotal;
+            public int Count;
+        }
+
         private const int SpawnFrames = 5;
 
         // Assemblies skipped the way StressProf skips them (native crashes while detouring in the lab; their time stays
@@ -77,6 +83,7 @@ namespace Morgott.Preloader.Profiling
             { "Update", "FixedUpdate", "LateUpdate", "CustomUpdate", "CustomFixedUpdate", "CustomLateUpdate", "UpdateAI" };
 
         private static readonly double MsPerTick = 1000.0 / Stopwatch.Frequency;
+        private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
         private static readonly Dictionary<MethodBase, int> Idx = new Dictionary<MethodBase, int>();
         private static readonly List<Rec> Recs = new List<Rec>();
         private static readonly List<int> Touched = new List<int>(1024);
@@ -89,6 +96,7 @@ namespace Morgott.Preloader.Profiling
         private static int _frameCalls;
 
         private static int _wrappedPatches, _wrappedPlugin, _wrappedVanilla, _failed, _skipped, _unpatchable;
+        private static int _calibSink;
         private static double _installSec;
         private static double _costTicksPerCall;
         private static long _playFrames, _playCalls, _spikeFrameCalls, _spikeFrames;
@@ -111,11 +119,49 @@ namespace Morgott.Preloader.Profiling
             if (_on && _depth > 0 && StackHookDepth[_depth - 1] == hookDepth) StackChild[_depth - 1] += ticks;
         }
 
+        private static string OwnerOf(MethodBase m, Dictionary<Assembly, string> owners)
+        {
+            Assembly a = m.DeclaringType?.Assembly;
+            return a != null && owners.TryGetValue(a, out string n) ? n : a?.GetName().Name ?? "?";
+        }
+
+        private static void AddTarget(
+            List<(MethodInfo m, string owner, string name, string kind)> targets,
+            HashSet<MethodBase> seen,
+            MethodInfo m,
+            string owner,
+            string name,
+            string kind)
+        {
+            if (m == null || m.IsAbstract || m.ContainsGenericParameters || m.DeclaringType == null || m.DeclaringType.ContainsGenericParameters) return;
+            if (SkipAsm.Contains(m.DeclaringType.Assembly.GetName().Name) || !seen.Add(m)) return;
+            MethodBody body = SafeMethodBody(m);
+            if (body == null) return;
+            if (SafeEndsInHandler(body)) _unpatchable++;
+            else targets.Add((m, owner, name, kind));
+        }
+
+        private static void AddPatchGroup(
+            IReadOnlyList<Patch> patchList,
+            MethodBase target,
+            Dictionary<Assembly, string> owners,
+            List<(MethodInfo m, string owner, string name, string kind)> targets,
+            HashSet<MethodBase> seen)
+        {
+            for (int i = 0; i < patchList.Count; i++)
+            {
+                Patch p = patchList[i];
+                if (p.PatchMethod == null || p.owner.StartsWith(PatchGuard.OwnPrefix, StringComparison.Ordinal)) continue;
+                AddTarget(targets, seen, p.PatchMethod, OwnerOf(p.PatchMethod, owners),
+                    p.PatchMethod.DeclaringType?.Name + "." + p.PatchMethod.Name + " -> " + target.DeclaringType?.Name + "." + target.Name, "patch");
+            }
+        }
+
         /// <summary>Main menu, after SpikeProbe's player loop: every plugin has loaded and patched.</summary>
         internal static void Install()
         {
             var sw = Stopwatch.StartNew();
-            _mainThread = Thread.CurrentThread.ManagedThreadId;
+            _mainThread = Environment.CurrentManagedThreadId;
             HashSet<string> skip = PatchOwnerProbe.CrashGuard("script-probe", "Script probe", out string pendingPath);
             if (PatchOwnerProbe.ResolveCache == null)
             {
@@ -133,67 +179,67 @@ namespace Morgott.Preloader.Profiling
             var owners = new Dictionary<Assembly, string>();
             foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
             {
-                string loc = Try(() => a.IsDynamic ? null : a.Location, null);
+                string loc = SafeLocation(a);
                 if (!string.IsNullOrEmpty(loc) && byPath.TryGetValue(Path.GetFullPath(loc), out string name)) owners[a] = name;
-            }
-            string OwnerOf(MethodBase m)
-            {
-                Assembly a = m.DeclaringType?.Assembly;
-                return a != null && owners.TryGetValue(a, out string n) ? n : a?.GetName().Name ?? "?";
             }
 
             var targets = new List<(MethodInfo m, string owner, string name, string kind)>();
             var seen = new HashSet<MethodBase>();
-            void Add(MethodInfo m, string owner, string name, string kind)
-            {
-                if (m == null || m.IsAbstract || m.ContainsGenericParameters || m.DeclaringType == null || m.DeclaringType.ContainsGenericParameters) return;
-                if (SkipAsm.Contains(m.DeclaringType.Assembly.GetName().Name) || !seen.Add(m)) return;
-                MethodBody body = Try(() => m.GetMethodBody(), null);
-                if (body == null) return;
-                if (Try(() => DetourSafety.EndsInHandler(body), true)) _unpatchable++;
-                else targets.Add((m, owner, name, kind));
-            }
 
             // A: foreign patch methods on anything (snapshot: wrapping them adds our own patches)
-            foreach (MethodBase target in Harmony.GetAllPatchedMethods().ToList())
+            var patched = new List<MethodBase>(Harmony.GetAllPatchedMethods());
+            for (int i = 0; i < patched.Count; i++)
             {
+                MethodBase target = patched[i];
                 Patches info = Harmony.GetPatchInfo(target);
                 if (info == null) continue;
-                foreach (Patch p in info.Prefixes.Concat(info.Postfixes).Concat(info.Finalizers))
-                {
-                    if (p.PatchMethod == null || p.owner.StartsWith(PatchGuard.OwnPrefix, StringComparison.Ordinal)) continue;
-                    Add(p.PatchMethod, OwnerOf(p.PatchMethod), p.PatchMethod.DeclaringType?.Name + "." + p.PatchMethod.Name + " -> " + target.DeclaringType?.Name + "." + target.Name, "patch");
-                }
+                AddPatchGroup(info.Prefixes, target, owners, targets, seen);
+                AddPatchGroup(info.Postfixes, target, owners, targets, seen);
+                AddPatchGroup(info.Finalizers, target, owners, targets, seen);
             }
             int patches = targets.Count;
 
             // B: plugin assemblies (Unity messages, coroutine bodies, module ticks)
             foreach (Assembly asm in owners.Keys)
             {
-                foreach (Type t in SafeTypes(asm))
+                List<Type> types = SafeTypes(asm);
+                string owner = owners[asm];
+                for (int ti = 0; ti < types.Count; ti++)
                 {
+                    Type t = types[ti];
                     bool mb = Is(typeof(MonoBehaviour), t), it = Is(typeof(IEnumerator), t);
-                    foreach (MethodInfo m in Methods(t))
+                    MethodInfo[] methods = Methods(t);
+                    for (int mi = 0; mi < methods.Length; mi++)
                     {
+                        MethodInfo m = methods[mi];
                         string kind = mb && PluginMsgs.Contains(m.Name) ? "msg" : it && m.Name == "MoveNext" ? "coroutine" : !m.IsStatic && m.Name == "Tick" && m.GetParameters().Length <= 1 ? "tick" : null;
-                        if (kind != null) Add(m, owners[asm], ShortName(t) + "." + m.Name, kind);
+                        if (kind != null) AddTarget(targets, seen, m, owner, ShortName(t) + "." + m.Name, kind);
                     }
                 }
             }
             int plugin = targets.Count - patches;
 
             // C: the game's per-frame messages
-            foreach (Type t in SafeTypes(typeof(ZNetScene).Assembly).Where(t => Is(typeof(MonoBehaviour), t)))
+            List<Type> gameTypes = SafeTypes(typeof(ZNetScene).Assembly);
+            for (int ti = 0; ti < gameTypes.Count; ti++)
             {
-                foreach (MethodInfo m in Methods(t).Where(m => VanillaMsgs.Contains(m.Name))) Add(m, "vanilla", t.Name + "." + m.Name, "vanilla");
+                Type t = gameTypes[ti];
+                if (!Is(typeof(MonoBehaviour), t)) continue;
+                MethodInfo[] methods = Methods(t);
+                for (int mi = 0; mi < methods.Length; mi++)
+                {
+                    MethodInfo m = methods[mi];
+                    if (VanillaMsgs.Contains(m.Name)) AddTarget(targets, seen, m, "vanilla", t.Name + "." + m.Name, "vanilla");
+                }
             }
             int vanilla = targets.Count - patches - plugin;
 
             var harmony = new Harmony(HarmonyId);
             var pre = new HarmonyMethod(AccessTools.Method(typeof(ScriptProbe), nameof(Pre)), Priority.First);
             var fin = new HarmonyMethod(AccessTools.Method(typeof(ScriptProbe), nameof(Fin)), Priority.Last);
-            foreach ((MethodInfo m, string owner, string name, string kind) in targets)
+            for (int i = 0; i < targets.Count; i++)
             {
+                (MethodInfo m, string owner, string name, string kind) = targets[i];
                 string id = PatchOwnerProbe.Identity(m);
                 if (skip.Contains(id))
                 {
@@ -219,9 +265,9 @@ namespace Morgott.Preloader.Profiling
             Calibrate(harmony, pre, fin);
             _installSec = sw.Elapsed.TotalSeconds;
             _on = true;
-            Log.Info(string.Format(CultureInfo.InvariantCulture,
-                "Script probe: {0} targets ({1} mod patch methods, {2} plugin messages/coroutines/ticks, {3} vanilla messages); wrapped {4}+{5}+{6}, failed {7}, skipped {8}, {11} left out (IL ends in a handler, see DetourSafety); {9:F1} s; {10:F0} ns per wrapped call",
-                targets.Count, patches, plugin, vanilla, _wrappedPatches, _wrappedPlugin, _wrappedVanilla, _failed, _skipped, _installSec, _costTicksPerCall * MsPerTick * 1e6, _unpatchable));
+            Log.Info($"Script probe: {targets.Count.ToString(Inv)} targets ({patches.ToString(Inv)} mod patch methods, {plugin.ToString(Inv)} plugin messages/coroutines/ticks, {vanilla.ToString(Inv)} vanilla messages); " +
+                     $"wrapped {_wrappedPatches.ToString(Inv)}+{_wrappedPlugin.ToString(Inv)}+{_wrappedVanilla.ToString(Inv)}, failed {_failed.ToString(Inv)}, skipped {_skipped.ToString(Inv)}, " +
+                     $"{_unpatchable.ToString(Inv)} left out (IL ends in a handler, see DetourSafety); {_installSec.ToString("F1", Inv)} s; {(_costTicksPerCall * MsPerTick * 1e6).ToString("F0", Inv)} ns per wrapped call");
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -235,24 +281,18 @@ namespace Morgott.Preloader.Profiling
             {
                 MethodInfo d = AccessTools.Method(typeof(ScriptProbe), nameof(Dummy));
                 int x = 0;
-                long Loop()
-                {
-                    long t0 = Stopwatch.GetTimestamp();
-                    for (int i = 0; i < n; i++) x = Dummy(x);
-                    return Stopwatch.GetTimestamp() - t0;
-                }
-                long plain = Loop();
+                long plain = RunCalibrationLoop(n, ref x);
                 Idx[d] = Recs.Count;
                 Recs.Add(new Rec { Owner = "(calibration)", Name = "Dummy", Kind = "calibration" });
                 harmony.Patch(d, prefix: pre, finalizer: fin);
                 _on = true;
-                long wrapped = Loop();
+                long wrapped = RunCalibrationLoop(n, ref x);
                 _on = false;
                 harmony.Unpatch(d, HarmonyPatchType.All, HarmonyId);
                 Recs[Idx[d]].ResetFrame();
                 Touched.Clear();
                 _depth = 0;
-                GC.KeepAlive(x);
+                _calibSink = x;
                 _costTicksPerCall = Math.Max(0, wrapped - plain) / (double)n;
             }
             catch (Exception e)
@@ -261,10 +301,17 @@ namespace Morgott.Preloader.Profiling
             }
         }
 
+        private static long RunCalibrationLoop(int n, ref int x)
+        {
+            long t0 = Stopwatch.GetTimestamp();
+            for (int i = 0; i < n; i++) x = Dummy(x);
+            return Stopwatch.GetTimestamp() - t0;
+        }
+
         private static void Pre(out long __state)
         {
             __state = 0;
-            if (!_on || _depth >= StackStart.Length || Thread.CurrentThread.ManagedThreadId != _mainThread) return;
+            if (!_on || _depth >= StackStart.Length || Environment.CurrentManagedThreadId != _mainThread) return;
             __state = Stopwatch.GetTimestamp();
             StackStart[_depth] = __state;
             StackChild[_depth] = 0;
@@ -305,7 +352,7 @@ namespace Morgott.Preloader.Profiling
         {
             if (-self <= SelfEpsilonTicks) return 0;
             _violations++;
-            if (Offenders.Count < MaxOffenders) Offenders.Add(string.Format(CultureInfo.InvariantCulture, "{0}|{1} {2:F3} ms", r.Owner, r.Name, self * MsPerTick));
+            if (Offenders.Count < MaxOffenders) Offenders.Add($"{r.Owner}|{r.Name} {(self * MsPerTick).ToString("F3", Inv)} ms");
             return 0;
         }
 
@@ -326,8 +373,9 @@ namespace Morgott.Preloader.Profiling
                 }
                 int best = -1;
                 long bestV = 0, covered = 0;
-                foreach (int i in Touched)
+                for (int ti = 0; ti < Touched.Count; ti++)
                 {
+                    int i = Touched[ti];
                     Rec r = Recs[i];
                     covered += r.FrameSelf;
                     r.PlaySelf += r.FrameSelf;
@@ -345,37 +393,92 @@ namespace Morgott.Preloader.Profiling
                 bool spawn = _playFrames <= SpawnFrames;
                 if (spike || spawn)
                 {
-                    top = string.Join("; ", Touched.Select(i => Recs[i]).Where(r => (r.FrameSelf + r.FrameHook) * MsPerTick >= (spawn ? 0.2 : 0.5))
-                        .OrderByDescending(r => r.FrameSelf + r.FrameHook).Take(spawn ? 15 : 4)
-                        .Select(r => r.Owner + "|" + r.Name + " " + SpikeProbe.F(r.FrameSelf * MsPerTick) +
-                                     (r.FrameHook * MsPerTick >= 0.1 ? "+" + SpikeProbe.F(r.FrameHook * MsPerTick) + "h" : "") + (r.FrameCalls > 1 ? " x" + r.FrameCalls : ""))
-                        .ToArray());
+                    double minMs = spawn ? 0.2 : 0.5;
+                    var hits = new List<Rec>();
+                    for (int ti = 0; ti < Touched.Count; ti++)
+                    {
+                        Rec r = Recs[Touched[ti]];
+                        if ((r.FrameSelf + r.FrameHook) * MsPerTick >= minMs) hits.Add(r);
+                    }
+                    hits.Sort(CompareFrameTotalDesc);
+                    int take = Math.Min(spawn ? 15 : 4, hits.Count);
+                    var topSb = new StringBuilder();
+                    for (int hi = 0; hi < take; hi++)
+                    {
+                        if (hi > 0) topSb.Append("; ");
+                        Rec r = hits[hi];
+                        topSb.Append(r.Owner).Append('|').Append(r.Name).Append(' ').Append(SpikeProbe.F(r.FrameSelf * MsPerTick));
+                        if (r.FrameHook * MsPerTick >= 0.1) topSb.Append('+').Append(SpikeProbe.F(r.FrameHook * MsPerTick)).Append('h');
+                        if (r.FrameCalls > 1) topSb.Append(" x").Append(r.FrameCalls.ToString(Inv));
+                    }
+                    top = topSb.ToString();
                     if (spawn)
                     {
-                        SpawnLines.Add(string.Format(CultureInfo.InvariantCulture, "play frame {0}: {1:F1} ms, wrapped self {2:F1} ms, {3} wrapped calls | {4}",
-                            _playFrames, ms, covered * MsPerTick, _frameCalls, top));
+                        SpawnLines.Add($"play frame {_playFrames.ToString(Inv)}: {ms.ToString("F1", Inv)} ms, wrapped self {(covered * MsPerTick).ToString("F1", Inv)} ms, {_frameCalls.ToString(Inv)} wrapped calls | {top}");
                     }
                 }
             }
-            foreach (int i in Touched) Recs[i].ResetFrame();
+            for (int ti = 0; ti < Touched.Count; ti++) Recs[Touched[ti]].ResetFrame();
             Touched.Clear();
             _frameCalls = 0;
             _depth = 0; // a frame boundary is never inside a measured call (the player loop runs it first)
             return top;
         }
 
+        private static int CompareFrameTotalDesc(Rec a, Rec b) => (b.FrameSelf + b.FrameHook).CompareTo(a.FrameSelf + a.FrameHook);
+
+        private static int CompareSpikeSelfDesc(Rec a, Rec b) => b.SpikeSelf.CompareTo(a.SpikeSelf);
+
+        private static int ComparePlayTotalDesc(Rec a, Rec b) => (b.PlaySelf + b.PlayHook).CompareTo(a.PlaySelf + a.PlayHook);
+
+        private static int ComparePlayMaxDesc(Rec a, Rec b) => b.PlayMax.CompareTo(a.PlayMax);
+
+        private sealed class SnapshotData
+        {
+            public Rec[] Rows;
+            public string[] Spawn;
+            public long PlayFrames, PlayCalls, SpikeFrames, SpikeCalls, Violations;
+            public double SpikeMs;
+            public string[] Offenders;
+        }
+
         /// <summary>Main-thread copy of the counters for a worker-thread write.</summary>
-        internal static object Snapshot() => !_on ? null
-            : (Recs.Where(r => r.PlayCalls > 0).Select(r => r.Copy()).ToArray(), SpawnLines.ToArray(), _playFrames, _playCalls, _spikeFrames, _spikeFrameCalls,
-                _spikeFrameMs, _violations, Offenders.ToArray());
+        internal static object Snapshot()
+        {
+            if (!_on) return null;
+            var copied = new List<Rec>(Recs.Count);
+            for (int i = 0; i < Recs.Count; i++)
+            {
+                if (Recs[i].PlayCalls > 0) copied.Add(Recs[i].Copy());
+            }
+            return new SnapshotData
+            {
+                Rows = copied.ToArray(),
+                Spawn = SpawnLines.ToArray(),
+                PlayFrames = _playFrames,
+                PlayCalls = _playCalls,
+                SpikeFrames = _spikeFrames,
+                SpikeCalls = _spikeFrameCalls,
+                SpikeMs = _spikeFrameMs,
+                Violations = _violations,
+                Offenders = Offenders.ToArray(),
+            };
+        }
 
         /// <summary>Worker thread: script-breakdown.txt from a <see cref="Snapshot"/>; residualMs = SpikeProbe's script residual over the spike frames.</summary>
         internal static void Write(object snapshot, double residualMs, double scriptMs)
         {
-            if (snapshot == null) return;
-            var (rows, spawn, playFrames, playCalls, spikeFrames, spikeCalls, spikeMs, violations, offenders) =
-                ((Rec[], string[], long, long, long, long, double, long, string[]))snapshot;
-            string selfCheck = "[Profiler] ScriptProbe self-check: " + violations.ToString(CultureInfo.InvariantCulture) + " violation(s)" +
+            if (!(snapshot is SnapshotData data)) return;
+            Rec[] rows = data.Rows;
+            string[] spawn = data.Spawn;
+            long playFrames = data.PlayFrames;
+            long playCalls = data.PlayCalls;
+            long spikeFrames = data.SpikeFrames;
+            long spikeCalls = data.SpikeCalls;
+            double spikeMs = data.SpikeMs;
+            long violations = data.Violations;
+            string[] offenders = data.Offenders;
+            string selfCheck = "[Profiler] ScriptProbe self-check: " + violations.ToString(Inv) + " violation(s)" +
                                (offenders.Length > 0 ? " (negative self time; first: " + string.Join("; ", offenders) + ")" : "");
             if (Interlocked.Exchange(ref _loggedViolations, violations) != violations)
             {
@@ -383,51 +486,82 @@ namespace Morgott.Preloader.Profiling
                 else Log.Warning(selfCheck);
             }
             double nsPerCall = _costTicksPerCall * MsPerTick * 1e6;
-            double coveredMs = rows.Sum(r => r.SpikeSelf) * MsPerTick;
+            long coveredTicks = 0;
+            for (int i = 0; i < rows.Length; i++) coveredTicks += rows[i].SpikeSelf;
+            double coveredMs = coveredTicks * MsPerTick;
             var sb = new StringBuilder();
-            void L(string format, params object[] args) => sb.Append(string.Format(CultureInfo.InvariantCulture, format, args)).Append('\n');
-            sb.Append("Morgott.Preloader script breakdown - ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append('\n');
-            L("wrapped {0} mod patch methods, {1} plugin messages/coroutines/ticks, {2} vanilla messages; failed {3}, skipped {4}; install {5:F1} s at the main menu",
-                _wrappedPatches, _wrappedPlugin, _wrappedVanilla, _failed, _skipped, _installSec);
-            L("overhead: {0:F0} ns per wrapped call (calibrated); play frames {1}, {2:F0} wrapped calls/frame -> ~{3:F0} us/frame; spike frames {4}, {5:F0} calls/frame -> ~{6:F2} ms/spike frame ({7:F1} of {8:F0} spike ms)",
-                nsPerCall, playFrames, playFrames > 0 ? playCalls / (double)playFrames : 0, playFrames > 0 ? playCalls * nsPerCall / 1000.0 / playFrames : 0,
-                spikeFrames, spikeFrames > 0 ? spikeCalls / (double)spikeFrames : 0, spikeFrames > 0 ? spikeCalls * nsPerCall / 1e6 / spikeFrames : 0, spikeCalls * nsPerCall / 1e6, spikeMs);
-            L("spike frames: script subsystems {0:F0} ms, residual (minus SpikeProbe hooks and probe) {1:F0} ms; wrapped self time outside hooks {2:F0} ms ({3:F0}% of the residual); rest = unwrapped engine/script work and wrapper overhead",
-                scriptMs, residualMs, coveredMs, residualMs > 0 ? 100 * coveredMs / residualMs : 0);
+            sb.Append("Morgott.Preloader script breakdown - ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", Inv)).Append('\n');
+            sb.Append("wrapped ").Append(_wrappedPatches).Append(" mod patch methods, ").Append(_wrappedPlugin)
+              .Append(" plugin messages/coroutines/ticks, ").Append(_wrappedVanilla).Append(" vanilla messages; failed ")
+              .Append(_failed).Append(", skipped ").Append(_skipped).Append("; install ").Append(_installSec.ToString("F1", Inv))
+              .Append(" s at the main menu\n");
+            double playCallsPerFrame = playFrames > 0 ? playCalls / (double)playFrames : 0;
+            double playUsPerFrame = playFrames > 0 ? playCalls * nsPerCall / 1000.0 / playFrames : 0;
+            double spikeCallsPerFrame = spikeFrames > 0 ? spikeCalls / (double)spikeFrames : 0;
+            double spikeMsPerFrame = spikeFrames > 0 ? spikeCalls * nsPerCall / 1e6 / spikeFrames : 0;
+            sb.Append("overhead: ").Append(nsPerCall.ToString("F0", Inv)).Append(" ns per wrapped call (calibrated); play frames ")
+              .Append(playFrames).Append(", ").Append(playCallsPerFrame.ToString("F0", Inv)).Append(" wrapped calls/frame -> ~")
+              .Append(playUsPerFrame.ToString("F0", Inv)).Append(" us/frame; spike frames ").Append(spikeFrames).Append(", ")
+              .Append(spikeCallsPerFrame.ToString("F0", Inv)).Append(" calls/frame -> ~").Append(spikeMsPerFrame.ToString("F2", Inv))
+              .Append(" ms/spike frame (").Append((spikeCalls * nsPerCall / 1e6).ToString("F1", Inv)).Append(" of ")
+              .Append(spikeMs.ToString("F0", Inv)).Append(" spike ms)\n");
+            double pctResidual = residualMs > 0 ? 100 * coveredMs / residualMs : 0;
+            sb.Append("spike frames: script subsystems ").Append(scriptMs.ToString("F0", Inv))
+              .Append(" ms, residual (minus SpikeProbe hooks and probe) ").Append(residualMs.ToString("F0", Inv))
+              .Append(" ms; wrapped self time outside hooks ").Append(coveredMs.ToString("F0", Inv)).Append(" ms (")
+              .Append(pctResidual.ToString("F0", Inv)).Append("% of the residual); rest = unwrapped engine/script work and wrapper overhead\n");
             sb.Append(selfCheck).Append("\n\n");
 
-            void Table(string title, IEnumerable<Rec> sel, int n)
-            {
-                sb.Append("== ").Append(title).Append('\n');
-                L("{0,9} {1,8} {2,9} {3,7} {4,6} {5,10} {6,9} {7,8}  {8,-28} {9,-9} {10}",
-                    "spikeMs", "inHook", "calls", "frames", "top", "playMs", "playCalls", "maxMs", "owner", "kind", "method");
-                foreach (Rec r in sel.Take(n))
-                {
-                    L("{0,9:F1} {1,8:F1} {2,9} {3,7} {4,6} {5,10:F0} {6,9} {7,8:F1}  {8,-28} {9,-9} {10}",
-                        r.SpikeSelf * MsPerTick, r.SpikeHook * MsPerTick, r.SpikeCalls, r.SpikeFrames, r.SpikeTop, (r.PlaySelf + r.PlayHook) * MsPerTick, r.PlayCalls,
-                        r.PlayMax * MsPerTick, r.Owner, r.Kind, r.Name);
-                }
-                sb.Append('\n');
-            }
+            var sorted = (Rec[])rows.Clone();
+            Array.Sort(sorted, CompareSpikeSelfDesc);
+            AppendTable(sb, "top 40 methods by self ms in spike frames (outside SpikeProbe hooks; inHook = inside create/zone/... hooks)", sorted, 40);
 
-            Table("top 40 methods by self ms in spike frames (outside SpikeProbe hooks; inHook = inside create/zone/... hooks)", rows.OrderByDescending(r => r.SpikeSelf), 40);
             sb.Append("== owners by self ms in spike frames / in all play frames\n");
-            foreach (var g in rows.GroupBy(r => r.Owner).OrderByDescending(g => g.Sum(r => r.SpikeSelf)).Take(30))
+            var ownerMap = new Dictionary<string, OwnerAgg>();
+            for (int i = 0; i < rows.Length; i++)
             {
-                L("{0,-30} spike {1,8:F1} ms (+{2:F1} in hooks)   play {3,9:F0} ms   {4} methods",
-                    g.Key, g.Sum(r => r.SpikeSelf) * MsPerTick, g.Sum(r => r.SpikeHook) * MsPerTick, g.Sum(r => r.PlaySelf + r.PlayHook) * MsPerTick, g.Count());
+                Rec r = rows[i];
+                if (!ownerMap.TryGetValue(r.Owner, out OwnerAgg agg))
+                    ownerMap[r.Owner] = agg = new OwnerAgg { Owner = r.Owner };
+                agg.SpikeSelf += r.SpikeSelf;
+                agg.SpikeHook += r.SpikeHook;
+                agg.PlayTotal += r.PlaySelf + r.PlayHook;
+                agg.Count++;
+            }
+            var ownerList = new List<OwnerAgg>(ownerMap.Values);
+            ownerList.Sort((a, b) => b.SpikeSelf.CompareTo(a.SpikeSelf));
+            int ownerTake = Math.Min(30, ownerList.Count);
+            for (int i = 0; i < ownerTake; i++)
+            {
+                OwnerAgg g = ownerList[i];
+                sb.Append(PadR(g.Owner, 30)).Append(" spike ").Append(PadF(g.SpikeSelf * MsPerTick, 8, "F1"))
+                  .Append(" ms (+").Append((g.SpikeHook * MsPerTick).ToString("F1", Inv)).Append(" in hooks)   play ")
+                  .Append(PadF(g.PlayTotal * MsPerTick, 9, "F0")).Append(" ms   ").Append(g.Count).Append(" methods\n");
             }
             sb.Append('\n');
-            Table("top 40 methods by self ms over all play frames", rows.OrderByDescending(r => r.PlaySelf + r.PlayHook), 40);
-            Table("top 25 methods by single-frame max", rows.OrderByDescending(r => r.PlayMax), 25);
-            sb.Append("== first ").Append(SpawnFrames).Append(" play frames after the spawn (owner|method self ms [+in hooks] [x calls])\n");
-            foreach (string l in spawn) sb.Append(l).Append('\n');
+
+            Array.Sort(sorted, ComparePlayTotalDesc);
+            AppendTable(sb, "top 40 methods by self ms over all play frames", sorted, 40);
+
             // Every row, so a method below the top tables can be compared A/B (the tables rank by session totals).
             var tsv = new StringBuilder("spikeMs\tinHook\tcalls\tframes\ttop\tplayMs\tplayCalls\tmaxMs\towner\tkind\tmethod\n");
-            foreach (Rec r in rows.OrderByDescending(r => r.PlaySelf + r.PlayHook))
-                tsv.Append(string.Format(CultureInfo.InvariantCulture, "{0:F2}\t{1:F2}\t{2}\t{3}\t{4}\t{5:F2}\t{6}\t{7:F2}\t{8}\t{9}\t{10}\n",
-                    r.SpikeSelf * MsPerTick, r.SpikeHook * MsPerTick, r.SpikeCalls, r.SpikeFrames, r.SpikeTop, (r.PlaySelf + r.PlayHook) * MsPerTick, r.PlayCalls,
-                    r.PlayMax * MsPerTick, r.Owner, r.Kind, r.Name));
+            for (int i = 0; i < sorted.Length; i++)
+            {
+                Rec r = sorted[i];
+                tsv.Append((r.SpikeSelf * MsPerTick).ToString("F2", Inv)).Append('\t')
+                   .Append((r.SpikeHook * MsPerTick).ToString("F2", Inv)).Append('\t')
+                   .Append(r.SpikeCalls).Append('\t').Append(r.SpikeFrames).Append('\t').Append(r.SpikeTop).Append('\t')
+                   .Append(((r.PlaySelf + r.PlayHook) * MsPerTick).ToString("F2", Inv)).Append('\t')
+                   .Append(r.PlayCalls).Append('\t').Append((r.PlayMax * MsPerTick).ToString("F2", Inv)).Append('\t')
+                   .Append(r.Owner).Append('\t').Append(r.Kind).Append('\t').Append(r.Name).Append('\n');
+            }
+
+            Array.Sort(sorted, ComparePlayMaxDesc);
+            AppendTable(sb, "top 25 methods by single-frame max", sorted, 25);
+
+            sb.Append("== first ").Append(SpawnFrames).Append(" play frames after the spawn (owner|method self ms [+in hooks] [x calls])\n");
+            for (int i = 0; i < spawn.Length; i++) sb.Append(spawn[i]).Append('\n');
+
             try
             {
                 AtomicFile.WriteAllText(Path.Combine(Profiler.OutputDir, "script-breakdown.txt"), sb.ToString());
@@ -439,6 +573,39 @@ namespace Morgott.Preloader.Profiling
             }
         }
 
+        private static void AppendTable(StringBuilder sb, string title, Rec[] rows, int n)
+        {
+            sb.Append("== ").Append(title).Append('\n');
+            sb.Append(PadL("spikeMs", 9)).Append(' ').Append(PadL("inHook", 8)).Append(' ').Append(PadL("calls", 9)).Append(' ')
+              .Append(PadL("frames", 7)).Append(' ').Append(PadL("top", 6)).Append(' ').Append(PadL("playMs", 10)).Append(' ')
+              .Append(PadL("playCalls", 9)).Append(' ').Append(PadL("maxMs", 8)).Append("  ").Append(PadR("owner", 28)).Append(' ')
+              .Append(PadR("kind", 9)).Append(" method\n");
+            int take = Math.Min(n, rows.Length);
+            for (int i = 0; i < take; i++)
+            {
+                Rec r = rows[i];
+                sb.Append(PadF(r.SpikeSelf * MsPerTick, 9, "F1")).Append(' ')
+                  .Append(PadF(r.SpikeHook * MsPerTick, 8, "F1")).Append(' ')
+                  .Append(PadN(r.SpikeCalls, 9)).Append(' ')
+                  .Append(PadN(r.SpikeFrames, 7)).Append(' ')
+                  .Append(PadN(r.SpikeTop, 6)).Append(' ')
+                  .Append(PadF((r.PlaySelf + r.PlayHook) * MsPerTick, 10, "F0")).Append(' ')
+                  .Append(PadN(r.PlayCalls, 9)).Append(' ')
+                  .Append(PadF(r.PlayMax * MsPerTick, 8, "F1")).Append("  ")
+                  .Append(PadR(r.Owner, 28)).Append(' ')
+                  .Append(PadR(r.Kind, 9)).Append(' ').Append(r.Name).Append('\n');
+            }
+            sb.Append('\n');
+        }
+
+        private static string PadF(double v, int width, string fmt) => v.ToString(fmt, Inv).PadLeft(width);
+
+        private static string PadN(long v, int width) => v.ToString(Inv).PadLeft(width);
+
+        private static string PadL(string s, int width) => (s ?? "").PadLeft(width);
+
+        private static string PadR(string s, int width) => (s ?? "").PadRight(width);
+
         private static string ShortName(Type t)
         {
             string n = t.Name;
@@ -447,39 +614,98 @@ namespace Morgott.Preloader.Profiling
         }
 
         // Plugin types can name optional assemblies that are not installed: reflection on them throws, such members are skipped.
-        private static T Try<T>(Func<T> f, T fallback)
+        private static string SafeLocation(Assembly a)
         {
             try
             {
-                return f();
+                return a.IsDynamic ? null : a.Location;
             }
             catch (Exception)
             {
-                return fallback;
+                return null;
             }
         }
 
-        private static IEnumerable<Type> SafeTypes(Assembly asm)
+        private static MethodBody SafeMethodBody(MethodInfo m)
         {
-            Type[] types;
             try
             {
-                types = asm.GetTypes();
+                return m.GetMethodBody();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static bool SafeEndsInHandler(MethodBody body)
+        {
+            try
+            {
+                return DetourSafety.EndsInHandler(body);
+            }
+            catch (Exception)
+            {
+                return true;
+            }
+        }
+
+        private static List<Type> SafeTypes(Assembly asm)
+        {
+            Type[] raw;
+            try
+            {
+                raw = asm.GetTypes();
             }
             catch (ReflectionTypeLoadException e)
             {
-                types = e.Types.Where(t => t != null).ToArray();
+                raw = e.Types;
             }
             catch (Exception)
             {
-                types = new Type[0];
+                raw = new Type[0];
             }
-            return types.Where(t => !Try(() => t.ContainsGenericParameters, true));
+            var result = new List<Type>(raw.Length);
+            for (int i = 0; i < raw.Length; i++)
+            {
+                Type t = raw[i];
+                if (t == null) continue;
+                bool hasGeneric;
+                try
+                {
+                    hasGeneric = t.ContainsGenericParameters;
+                }
+                catch (Exception)
+                {
+                    hasGeneric = true;
+                }
+                if (!hasGeneric) result.Add(t);
+            }
+            return result;
         }
 
-        private static bool Is(Type b, Type t) => Try(() => b.IsAssignableFrom(t), false);
+        private static bool Is(Type b, Type t)
+        {
+            try
+            {
+                return b.IsAssignableFrom(t);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
 
-        private static MethodInfo[] Methods(Type t) =>
-            Try(() => t.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly), new MethodInfo[0]);
+        private static MethodInfo[] Methods(Type t)
+        {
+            try
+            {
+                return t.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            }
+            catch (Exception)
+            {
+                return new MethodInfo[0];
+            }
+        }
     }
 }

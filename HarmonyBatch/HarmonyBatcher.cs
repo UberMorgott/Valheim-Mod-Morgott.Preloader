@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using Morgott.Preloader.Core;
 using HarmonyLib;
@@ -55,7 +56,7 @@ namespace Morgott.Preloader.HarmonyBatch
             // Finalizer First: runs before the profiler's Last finalizer, so the flush is timed inside this PatchAll.
             harmony.Patch(patchAll, prefix: Hook(nameof(PatchAllPrefix)), finalizer: Hook(nameof(PatchAllFinalizer)));
             Lifecycle.MenuReady += () =>
-                Log.Info($"HarmonyBatching: {_batches} PatchAll calls, {_deferred} wrapper builds deferred -> {_built} built until the main menu");
+                Log.Info($"HarmonyBatching: {_batches.ToString(CultureInfo.InvariantCulture)} PatchAll calls, {_deferred.ToString(CultureInfo.InvariantCulture)} wrapper builds deferred -> {_built.ToString(CultureInfo.InvariantCulture)} built until the main menu");
         }
 
         private static HarmonyMethod Hook(string name) => new HarmonyMethod(AccessTools.Method(typeof(HarmonyBatcher), name), Priority.First);

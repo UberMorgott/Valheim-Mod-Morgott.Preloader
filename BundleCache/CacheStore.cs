@@ -45,7 +45,11 @@ internal sealed class CacheStore
 
     /// <summary>Writer temp next to <paramref name="target"/>: <c>&lt;target&gt;.&lt;pid&gt;.&lt;kind&gt;.tmp</c>.</summary>
     public static string TempOf(string target, string kind) =>
+#if NET
+        target + "." + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + "." + kind + ".tmp";
+#else
         target + "." + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture) + "." + kind + ".tmp";
+#endif
 
     public string UpgradePath(string fileName) => Path.Combine(Dir, fileName + UpgradeExtension);
 
@@ -93,8 +97,12 @@ internal sealed class CacheStore
         }
         // Compared by name only: a full-path comparison once mixed '/' and '\' and deleted the live directory.
         string current = Path.GetFileName(Dir);
-        foreach (DirectoryInfo dir in new DirectoryInfo(_root).GetDirectories("v*-*").Where(d => !string.Equals(d.Name, current, StringComparison.OrdinalIgnoreCase)))
+        foreach (DirectoryInfo dir in new DirectoryInfo(_root).GetDirectories("v*-*"))
         {
+            if (string.Equals(dir.Name, current, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             try
             {
                 dir.Delete(true);
@@ -127,9 +135,15 @@ internal sealed class CacheStore
                 files.Add(file);
             }
 
-            long total = files.Sum(f => f.Length);
-            foreach (FileInfo file in files.OrderBy(f => _index[f.Name].LastUsedUtc))
+            long total = 0;
+            for (int i = 0; i < files.Count; i++)
             {
+                total += files[i].Length;
+            }
+            files.Sort(new LastUsedComparer(_index));
+            for (int i = 0; i < files.Count; i++)
+            {
+                FileInfo file = files[i];
                 if (total <= capBytes)
                 {
                     break;
@@ -142,14 +156,39 @@ internal sealed class CacheStore
                 }
             }
 
-            var present = new HashSet<string>(files.Select(f => f.Name), StringComparer.OrdinalIgnoreCase);
-            foreach (string name in _index.Keys.Where(k => !present.Contains(k) || !File.Exists(Path.Combine(Dir, k))).ToList())
+            var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < files.Count; i++)
             {
-                _index.Remove(name);
+                present.Add(files[i].Name);
+            }
+            List<string> staleKeys = null;
+            foreach (string key in _index.Keys)
+            {
+                if (!present.Contains(key) || !File.Exists(Path.Combine(Dir, key)))
+                {
+                    staleKeys ??= new List<string>();
+                    staleKeys.Add(key);
+                }
+            }
+            if (staleKeys != null)
+            {
+                for (int i = 0; i < staleKeys.Count; i++)
+                {
+                    _index.Remove(staleKeys[i]);
+                }
             }
             SaveIndex();
             return total;
         }
+    }
+
+    private sealed class LastUsedComparer : IComparer<FileInfo>
+    {
+        private readonly Dictionary<string, (long LastUsedUtc, string Label)> _index;
+
+        public LastUsedComparer(Dictionary<string, (long LastUsedUtc, string Label)> index) => _index = index;
+
+        public int Compare(FileInfo x, FileInfo y) => _index[x.Name].LastUsedUtc.CompareTo(_index[y.Name].LastUsedUtc);
     }
 
     /// <summary>False when the file stays (e.g. still mapped by a bundle another process has loaded); a leftover
@@ -200,8 +239,9 @@ internal sealed class CacheStore
             {
                 return;
             }
-            foreach (string[] cols in File.ReadAllLines(path).Select(line => line.Split('\t')))
+            foreach (string line in File.ReadAllLines(path))
             {
+                string[] cols = line.Split('\t');
                 if (cols.Length >= 2 && cols[0].EndsWith(BundleExtension, StringComparison.OrdinalIgnoreCase) &&
                     long.TryParse(cols[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out long ticks))
                 {
@@ -219,9 +259,13 @@ internal sealed class CacheStore
     {
         var sb = new StringBuilder();
         sb.AppendLine("# Morgott.Preloader bundle cache: file<TAB>last used (UTC ticks)<TAB>source. Only used for LRU eviction.");
-        foreach (var kv in _index.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        var keys = new List<string>(_index.Keys);
+        keys.Sort(StringComparer.Ordinal);
+        for (int i = 0; i < keys.Count; i++)
         {
-            sb.Append(kv.Key).Append('\t').Append(kv.Value.LastUsedUtc.ToString(CultureInfo.InvariantCulture)).Append('\t').Append(kv.Value.Label).AppendLine();
+            string key = keys[i];
+            var value = _index[key];
+            sb.Append(key).Append('\t').Append(value.LastUsedUtc.ToString(CultureInfo.InvariantCulture)).Append('\t').Append(value.Label).AppendLine();
         }
         try
         {

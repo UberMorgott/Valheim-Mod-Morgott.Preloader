@@ -39,20 +39,29 @@ namespace Morgott.Preloader.WorldGen
             sb.Append("lakes ").Append(lakes.Count.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(Sha(lakeText)).Append('\n');
             sb.Append("rivers ").Append(HashRivers(generator.GetRivers())).Append('\n');
             sb.Append("streams ").Append(HashRivers(generator.GetStreams())).Append('\n');
-            var rows = zs.m_locationInstances.Select(entry =>
+            var rows = new List<(string Name, int x, int y, string Line)>(zs.m_locationInstances.Count);
+            foreach (var entry in zs.m_locationInstances)
             {
                 ZoneSystem.LocationInstance instance = entry.Value;
                 string name = instance.m_location?.m_prefab.name ?? "<null>";
-                return (Name: name, entry.Key.x, entry.Key.y, Line: string.Format(CultureInfo.InvariantCulture,
-                    "{0}\t{1},{2}\t{3:x8},{4:x8},{5:x8}\t{6}", name, entry.Key.x, entry.Key.y, Hash.Bits(instance.m_position.x),
-                    Hash.Bits(instance.m_position.y), Hash.Bits(instance.m_position.z), instance.m_placed ? "placed" : "-"));
-            }).ToList();
+                string line = $"{name}\t{entry.Key.x.ToString(CultureInfo.InvariantCulture)},{entry.Key.y.ToString(CultureInfo.InvariantCulture)}\t" +
+                              $"{Hash.Bits(instance.m_position.x).ToString("x8", CultureInfo.InvariantCulture)},{Hash.Bits(instance.m_position.y).ToString("x8", CultureInfo.InvariantCulture)},{Hash.Bits(instance.m_position.z).ToString("x8", CultureInfo.InvariantCulture)}\t" +
+                              $"{(instance.m_placed ? "placed" : "-")}";
+                rows.Add((name, entry.Key.x, entry.Key.y, line));
+            }
             sb.Append("locations ").Append(rows.Count.ToString(CultureInfo.InvariantCulture)).Append('\n');
-            foreach (var row in rows.OrderBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.x).ThenBy(r => r.y)) sb.Append(row.Line).Append('\n');
+            rows.Sort((a, b) =>
+            {
+                int cmp = StringComparer.Ordinal.Compare(a.Name, b.Name);
+                if (cmp != 0) return cmp;
+                cmp = a.x.CompareTo(b.x);
+                return cmp != 0 ? cmp : a.y.CompareTo(b.y);
+            });
+            for (int i = 0; i < rows.Count; i++) sb.Append(rows[i].Line).Append('\n');
             string path = Path.Combine(Paths.BepInExRootPath, "Morgott.Preloader", "diag",
                 "locations-" + generator.GetSeed().ToString(CultureInfo.InvariantCulture) + ".txt");
             AtomicFile.WriteAllText(path, sb.ToString());
-            Log.Info($"WorldGen: {rows.Count} location instances dumped to {path}");
+            Log.Info($"WorldGen: {rows.Count.ToString(CultureInfo.InvariantCulture)} location instances dumped to {path}");
         }
 
         /// <summary>One log line at VerifyBiomeData end: SHA-256 (first 16 hex) of the biome map, heights, lakes, rivers,
@@ -71,13 +80,12 @@ namespace Morgott.Preloader.WorldGen
             }
             string lakes = string.Concat((generator.GetLakes() ?? new List<Vector2>()).Select(p => X8(p.x) + X8(p.y)));
             AltBiomeWorldData data = world?.m_biomeData;
-            return "sectors " + HashSectors(data) + " " + string.Format(CultureInfo.InvariantCulture,
-                "biomes {0} heights {1} lakes {2} {3} rivers {4} streams {5} riverPoints keys {6} points {7} sha {8} riverCache now {9}",
-                data?.PointBiomes != null ? HashBiomes(data.PointBiomes).Substring(0, 16) : "-",
-                data?.PointHeights != null ? HashHeights(data.PointHeights).Substring(0, 16) : "-",
-                generator.GetLakes()?.Count ?? 0, Sha(lakes).Substring(0, 16),
-                HashRivers(generator.GetRivers()), HashRivers(generator.GetStreams()),
-                riverPoints.Count, count, Sha(points.ToString()).Substring(0, 16), RiverCacheHash(generator));
+            string biomesHash = data?.PointBiomes != null ? HashBiomes(data.PointBiomes).Substring(0, 16) : "-";
+            string heightsHash = data?.PointHeights != null ? HashHeights(data.PointHeights).Substring(0, 16) : "-";
+            int lakesCount = generator.GetLakes()?.Count ?? 0;
+            return $"sectors {HashSectors(data)} biomes {biomesHash} heights {heightsHash} lakes {lakesCount.ToString(CultureInfo.InvariantCulture)} {Sha(lakes).Substring(0, 16)} " +
+                   $"rivers {HashRivers(generator.GetRivers())} streams {HashRivers(generator.GetStreams())} " +
+                   $"riverPoints keys {riverPoints.Count.ToString(CultureInfo.InvariantCulture)} points {count.ToString(CultureInfo.InvariantCulture)} sha {Sha(points.ToString()).Substring(0, 16)} riverCache now {RiverCacheHash(generator)}";
         }
 
         /// <summary>Sector graph of the biome map: every sector in list order (fields, alt biomes, neighbours as list

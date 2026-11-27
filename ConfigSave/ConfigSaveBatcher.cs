@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -35,6 +36,7 @@ namespace Morgott.Preloader.ConfigSave
 
         private const long MaxWorldHoldSeconds = 180;
 
+        private static Harmony _harmony;
         private static bool _active;
 
         /// <summary>Stopwatch timestamp after which a world-load hold ends at the next save; 0 = no world-load hold.</summary>
@@ -47,6 +49,7 @@ namespace Morgott.Preloader.ConfigSave
 
         public static void Install(Harmony harmony, bool holdWorldLoad)
         {
+            _harmony = harmony;
             harmony.Patch(AccessTools.DeclaredMethod(typeof(Chainloader), nameof(Chainloader.Start)),
                 prefix: Hook(nameof(Begin), Priority.First), finalizer: Hook(nameof(StartFinalizer), Priority.Last));
             harmony.Patch(AccessTools.DeclaredMethod(typeof(ConfigFile), nameof(ConfigFile.Save)),
@@ -59,18 +62,18 @@ namespace Morgott.Preloader.ConfigSave
             if (holdWorldLoad)
             {
                 // Game types: only once the engine is up.
-                Lifecycle.ChainloaderInitialized += () => Log.Guard("ConfigSaveBatcher world load hooks", () => InstallWorldLoad(harmony));
+                Lifecycle.ChainloaderInitialized += () => Log.Guard("ConfigSaveBatcher world load hooks", InstallWorldLoad);
             }
         }
 
-        private static void InstallWorldLoad(Harmony harmony)
+        private static void InstallWorldLoad()
         {
             if (UnityEngine.Application.isBatchMode) return;
-            harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "LoadMainScene"), prefix: Hook(nameof(WorldBegin), Priority.First),
+            _harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "LoadMainScene"), prefix: Hook(nameof(WorldBegin), Priority.First),
                 finalizer: Hook(nameof(LoadMainSceneFinalizer), Priority.Last));
-            harmony.Patch(AccessTools.DeclaredMethod(typeof(ZNet), "OnNewConnection"), prefix: Hook(nameof(ConnectPrefix), Priority.First));
-            harmony.Patch(AccessTools.DeclaredMethod(typeof(Game), "SpawnPlayer"), finalizer: Hook(nameof(SpawnFinalizer), Priority.Last));
-            harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "Start"), postfix: Hook(nameof(MenuPostfix), Priority.Last));
+            _harmony.Patch(AccessTools.DeclaredMethod(typeof(ZNet), "OnNewConnection"), prefix: Hook(nameof(ConnectPrefix), Priority.First));
+            _harmony.Patch(AccessTools.DeclaredMethod(typeof(Game), "SpawnPlayer"), finalizer: Hook(nameof(SpawnFinalizer), Priority.Last));
+            _harmony.Patch(AccessTools.DeclaredMethod(typeof(FejdStartup), "Start"), postfix: Hook(nameof(MenuPostfix), Priority.Last));
         }
 
         private static void WorldBegin()
@@ -240,8 +243,9 @@ namespace Morgott.Preloader.ConfigSave
             }
             Stopwatch watch = Stopwatch.StartNew();
             int failed = files.Count(file => !SaveNow(file));
-            Log.Info($"ConfigSaveBatcher: {deferred} saves deferred -> {files.Length} file writes at {reason} " +
-                     $"in {watch.ElapsedMilliseconds} ms, {explicitSaves} explicit saves written at once" + (failed > 0 ? $", {failed} failed" : ""));
+            Log.Info($"ConfigSaveBatcher: {deferred.ToString(CultureInfo.InvariantCulture)} saves deferred -> {files.Length.ToString(CultureInfo.InvariantCulture)} file writes at {reason} " +
+                     $"in {watch.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)} ms, {explicitSaves.ToString(CultureInfo.InvariantCulture)} explicit saves written at once" +
+                     (failed > 0 ? $", {failed.ToString(CultureInfo.InvariantCulture)} failed" : ""));
         }
 
         /// <summary>Runs the real Save now. A failure is logged here: the plugin whose Bind triggered it has moved on.</summary>

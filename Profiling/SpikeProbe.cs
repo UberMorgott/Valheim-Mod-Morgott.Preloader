@@ -131,7 +131,11 @@ namespace Morgott.Preloader.Profiling
         private static readonly int[] FCalls = new int[SCount];
         private static readonly long[] FSelf = new long[SCount];
         private static readonly long[] FMax = new long[SCount];
-        private static readonly object[] FMaxKey = new object[SCount];
+        private static readonly string[] FMaxName = new string[SCount];
+        private static int _fMaxPrefab;
+        private static bool _fMaxHasPrefab;
+        private static Vector2s _fMaxZone;
+        private static bool _fMaxHasZone;
         private static readonly long[] SessionCalls = new long[SCount];
         private static readonly long[] SessionSelf = new long[SCount];
         private static readonly long[] StackStart = new long[64];
@@ -201,7 +205,7 @@ namespace Morgott.Preloader.Profiling
         internal static void Install(Harmony harmony)
         {
             _thresholdMs = Math.Max(1.0, Config.SpikeThresholdMs.Value);
-            _mainThread = Thread.CurrentThread.ManagedThreadId;
+            _mainThread = Environment.CurrentManagedThreadId;
             _combatTimer = AccessTools.FieldRefAccess<Humanoid, float>("m_lastCombatTimer");
             int hooked = Hook(harmony, AccessTools.DeclaredMethod(typeof(ZNetScene), "CreateObject"), SCreate, nameof(CreateFin), nameof(CreatePost))
                          + Hook(harmony, AccessTools.DeclaredMethod(typeof(ZoneSystem), "SpawnZone"), SZone, nameof(ZoneFin), null)
@@ -218,7 +222,7 @@ namespace Morgott.Preloader.Profiling
             if (Config.ScriptBreakdown.Value)
                 Lifecycle.MenuReady += () => Log.Guard("Script probe install", ScriptProbe.Install);
             Application.quitting += () => Log.Guard("Spike probe flush", () => Write(true));
-            Log.Info($"Spike probe: {hooked} hooks, threshold {_thresholdMs:F0} ms; player loop at the main menu");
+            Log.Info($"Spike probe: {hooked.ToString(CultureInfo.InvariantCulture)} hooks, threshold {_thresholdMs.ToString("F0", CultureInfo.InvariantCulture)} ms; player loop at the main menu");
         }
 
         private static int Hook(Harmony harmony, MethodBase target, int signal, string finalizer, string postfix)
@@ -246,7 +250,7 @@ namespace Morgott.Preloader.Profiling
         private static void Pre(out long __state)
         {
             __state = 0;
-            if (!_active || _depth >= StackStart.Length || Thread.CurrentThread.ManagedThreadId != _mainThread) return;
+            if (!_active || _depth >= StackStart.Length || Environment.CurrentManagedThreadId != _mainThread) return;
             __state = Stopwatch.GetTimestamp();
             StackStart[_depth] = __state;
             StackChild[_depth] = 0;
@@ -278,22 +282,26 @@ namespace Morgott.Preloader.Profiling
 
         private static void Fin(long __state, MethodBase __originalMethod)
         {
-            if (__state != 0 && SignalOf.TryGetValue(__originalMethod, out int s) && Slowest(__state, s)) FMaxKey[s] = __originalMethod.Name;
+            if (__state != 0 && SignalOf.TryGetValue(__originalMethod, out int s) && Slowest(__state, s)) FMaxName[s] = __originalMethod.Name;
         }
 
         private static void CreateFin(long __state, ZDO zdo)
         {
-            if (Slowest(__state, SCreate)) FMaxKey[SCreate] = zdo != null ? (object)zdo.GetPrefab() : null;
+            if (!Slowest(__state, SCreate)) return;
+            _fMaxHasPrefab = zdo != null;
+            if (zdo != null) _fMaxPrefab = zdo.GetPrefab();
         }
 
         private static void ZoneFin(long __state, Vector2s zoneID)
         {
-            if (Slowest(__state, SZone)) FMaxKey[SZone] = zoneID;
+            if (!Slowest(__state, SZone)) return;
+            _fMaxHasZone = true;
+            _fMaxZone = zoneID;
         }
 
         private static void LocationFin(long __state, ZoneSystem.ZoneLocation location)
         {
-            if (Slowest(__state, SLocation)) FMaxKey[SLocation] = location?.m_prefabName;
+            if (Slowest(__state, SLocation)) FMaxName[SLocation] = location?.m_prefabName;
         }
 
         private static void CreatePost(GameObject __result, ZDO zdo)
@@ -314,7 +322,7 @@ namespace Morgott.Preloader.Profiling
         /// <summary>First instance of a prefab: its shaders and (shader, keywords, instancing) combinations not seen yet.</summary>
         private static void Scan(GameObject go)
         {
-            if (Thread.CurrentThread.ManagedThreadId != _mainThread) return;
+            if (Environment.CurrentManagedThreadId != _mainThread) return;
             long t0 = Stopwatch.GetTimestamp();
             _fNewPrefabs++;
             try
@@ -404,8 +412,8 @@ namespace Morgott.Preloader.Profiling
             StartRecorders();
             PlayerLoop.SetPlayerLoop(root);
             _active = true;
-            Log.Info($"Spike probe: {_subNames.Length} player-loop markers; logical cores Environment={Environment.ProcessorCount} " +
-                     $"SystemInfo={SystemInfo.processorCount} JobWorkerCount={JobsUtility.JobWorkerCount}/{JobsUtility.JobWorkerMaximumCount}; ProfilerRecorder metrics available={_availableMetrics}; frame timing stats={_frameTimingEnabled}");
+            Log.Info($"Spike probe: {_subNames.Length.ToString(CultureInfo.InvariantCulture)} player-loop markers; logical cores Environment={Environment.ProcessorCount.ToString(CultureInfo.InvariantCulture)} " +
+                     $"SystemInfo={SystemInfo.processorCount.ToString(CultureInfo.InvariantCulture)} JobWorkerCount={JobsUtility.JobWorkerCount.ToString(CultureInfo.InvariantCulture)}/{JobsUtility.JobWorkerMaximumCount.ToString(CultureInfo.InvariantCulture)}; ProfilerRecorder metrics available={_availableMetrics.ToString(CultureInfo.InvariantCulture)}; frame timing stats={_frameTimingEnabled.ToString()}");
         }
 
         private static bool IsForeign(PlayerLoopSystem s) => s.type != null && s.type.Assembly != typeof(PlayerLoop).Assembly && s.type.Namespace?.StartsWith("UnityEngine") != true;
@@ -422,10 +430,19 @@ namespace Morgott.Preloader.Profiling
             return names.Count - 1;
         }
 
+        private sealed class LoopMarker(int idx, bool frameStart)
+        {
+            public void Tick()
+            {
+                if (frameStart) FrameStart(idx);
+                else Mark(idx);
+            }
+        }
+
         private static PlayerLoopSystem Marker(int idx, bool frameStart) => new PlayerLoopSystem
         {
             type = typeof(SpikeProbe),
-            updateDelegate = frameStart ? new PlayerLoopSystem.UpdateFunction(() => FrameStart(idx)) : () => Mark(idx),
+            updateDelegate = new LoopMarker(idx, frameStart).Tick,
         };
 
         private static long Mark(int idx)
@@ -455,7 +472,9 @@ namespace Morgott.Preloader.Profiling
             Array.Clear(FCalls, 0, SCount);
             Array.Clear(FSelf, 0, SCount);
             Array.Clear(FMax, 0, SCount);
-            Array.Clear(FMaxKey, 0, SCount);
+            Array.Clear(FMaxName, 0, SCount);
+            _fMaxHasPrefab = false;
+            _fMaxHasZone = false;
             _prevNewVariants = _fNewVariants + _fNewShaders;
             _fNewPrefabs = _fNewShaders = _fNewVariants = 0;
             FNewShaderNames.Clear();
@@ -493,7 +512,9 @@ namespace Morgott.Preloader.Profiling
                 foreach (ProfilerRecorderHandle h in list)
                 {
                     ProfilerRecorderDescription d = ProfilerRecorderHandle.GetDescription(h);
-                    sb.Append(d.Category.Name).Append('\t').Append(d.Name).Append('\t').Append(d.UnitType).Append('\t').Append(d.Flags).Append('\n');
+                    sb.Append(d.Category.Name).Append('\t').Append(d.Name).Append('\t').Append(UnitTypeName(d.UnitType)).Append('\t');
+                    AppendMarkerFlags(sb, d.Flags);
+                    sb.Append('\n');
                 }
                 Directory.CreateDirectory(Dir);
                 AtomicFile.WriteAllText(Path.Combine(Dir, "profiler-available.txt"), sb.ToString());
@@ -586,10 +607,53 @@ namespace Morgott.Preloader.Profiling
             }
         }
 
-        private static string Inv(FormattableString s) => FormattableString.Invariant(s);
+        private static string UnitTypeName(ProfilerMarkerDataUnit unit) => unit switch
+        {
+            ProfilerMarkerDataUnit.Undefined => nameof(ProfilerMarkerDataUnit.Undefined),
+            ProfilerMarkerDataUnit.TimeNanoseconds => nameof(ProfilerMarkerDataUnit.TimeNanoseconds),
+            ProfilerMarkerDataUnit.Bytes => nameof(ProfilerMarkerDataUnit.Bytes),
+            ProfilerMarkerDataUnit.Count => nameof(ProfilerMarkerDataUnit.Count),
+            ProfilerMarkerDataUnit.Percent => nameof(ProfilerMarkerDataUnit.Percent),
+            ProfilerMarkerDataUnit.FrequencyHz => nameof(ProfilerMarkerDataUnit.FrequencyHz),
+            _ => ((int)unit).ToString(CultureInfo.InvariantCulture),
+        };
+
+        private static void AppendMarkerFlags(StringBuilder sb, Unity.Profiling.LowLevel.MarkerFlags flags)
+        {
+            int v = (int)flags;
+            if (v == 0)
+            {
+                sb.Append(nameof(Unity.Profiling.LowLevel.MarkerFlags.Default));
+                return;
+            }
+            bool any = false;
+            void Flag(int bit, string name)
+            {
+                if ((v & bit) == 0) return;
+                if (any) sb.Append(", ");
+                sb.Append(name);
+                any = true;
+                v &= ~bit;
+            }
+            Flag(2, nameof(Unity.Profiling.LowLevel.MarkerFlags.Script));
+            Flag(4, nameof(Unity.Profiling.LowLevel.MarkerFlags.AvailabilityEditor));
+            Flag(8, nameof(Unity.Profiling.LowLevel.MarkerFlags.AvailabilityNonDevelopment));
+            Flag(16, nameof(Unity.Profiling.LowLevel.MarkerFlags.Warning));
+            Flag(32, nameof(Unity.Profiling.LowLevel.MarkerFlags.ScriptInvoke));
+            Flag(64, nameof(Unity.Profiling.LowLevel.MarkerFlags.ScriptDeepProfiler));
+            Flag(128, nameof(Unity.Profiling.LowLevel.MarkerFlags.Counter));
+            Flag(256, nameof(Unity.Profiling.LowLevel.MarkerFlags.SampleGPU));
+            if (v != 0)
+            {
+                if (any) sb.Append(", ");
+                sb.Append(v);
+            }
+        }
 
         private static Spike Record(Player player, Vector3 pos, Vector2s zone, long now, double ms, int d0, int d1, int d2)
         {
+            var selfMs = new float[SCount];
+            for (int i = 0; i < SCount; i++) selfMs[i] = (float)(FSelf[i] * MsPerTick);
             var s = new Spike
             {
                 T = (now - _playStart) * MsPerTick / 1000.0,
@@ -600,14 +664,14 @@ namespace Morgott.Preloader.Profiling
                 Interior = player.InInterior(),
                 ZoneChanged = (now - _zoneChangedAt) * MsPerTick < 1000,
                 Speed = player.GetVelocity().magnitude,
-                Pos = Inv($"{(int)pos.x},{(int)pos.y},{(int)pos.z}"),
-                Zone = Inv($"{zone.x},{zone.y}"),
+                Pos = ((int)pos.x).ToString(CultureInfo.InvariantCulture) + "," + ((int)pos.y).ToString(CultureInfo.InvariantCulture) + "," + ((int)pos.z).ToString(CultureInfo.InvariantCulture),
+                Zone = zone.x.ToString(CultureInfo.InvariantCulture) + "," + zone.y.ToString(CultureInfo.InvariantCulture),
                 Gc0 = d0,
                 Gc1 = d1,
                 Gc2 = d2,
                 Counters = (long[])CounterNow.Clone(),
                 Calls = (int[])FCalls.Clone(),
-                SelfMs = FSelf.Select(t => (float)(t * MsPerTick)).ToArray(),
+                SelfMs = selfMs,
                 MaxName = new string[SCount],
                 NewPrefabs = _fNewPrefabs,
                 NewShaders = _fNewShaders,
@@ -619,8 +683,16 @@ namespace Morgott.Preloader.Profiling
             try
             {
                 s.Combat = _combatTimer(player) < 5f;
-                s.Mobs = Character.GetAllCharacters().Count(c => c != null && c != player && !c.IsPlayer() && !c.IsTamed() && !c.IsDead() &&
-                                                                  (c.transform.position - pos).sqrMagnitude < 900f);
+                List<Character> chars = Character.GetAllCharacters();
+                int mobs = 0;
+                for (int i = 0; i < chars.Count; i++)
+                {
+                    Character c = chars[i];
+                    if (c != null && c != player && !c.IsPlayer() && !c.IsTamed() && !c.IsDead() &&
+                        (c.transform.position - pos).sqrMagnitude < 900f)
+                        mobs++;
+                }
+                s.Mobs = mobs;
             }
             catch (Exception)
             {
@@ -628,15 +700,24 @@ namespace Morgott.Preloader.Profiling
             }
             for (int i = 0; i < SCount; i++)
             {
-                object key = FMaxKey[i];
-                if (key == null || FMax[i] * MsPerTick < 0.5) continue;
-                string name = key switch
+                if (FMax[i] * MsPerTick < 0.5) continue;
+                string name;
+                if (i == SCreate)
                 {
-                    int hash => (ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(hash) : null) is GameObject prefab && prefab != null
-                        ? prefab.name : hash.ToString(CultureInfo.InvariantCulture),
-                    Vector2s z => Inv($"{z.x},{z.y}"),
-                    _ => key as string,
-                };
+                    if (!_fMaxHasPrefab) continue;
+                    GameObject prefab = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(_fMaxPrefab) : null;
+                    name = prefab != null ? prefab.name : _fMaxPrefab.ToString(CultureInfo.InvariantCulture);
+                }
+                else if (i == SZone)
+                {
+                    if (!_fMaxHasZone) continue;
+                    name = _fMaxZone.x.ToString(CultureInfo.InvariantCulture) + "," + _fMaxZone.y.ToString(CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    name = FMaxName[i];
+                    if (name == null) continue;
+                }
                 s.MaxName[i] = name + " " + F(FMax[i] * MsPerTick);
             }
             var top = new List<(int i, long t)>();
@@ -653,30 +734,57 @@ namespace Morgott.Preloader.Profiling
                 }
                 if (m >= 1.0) top.Add((i, _acc[i]));
             }
-            s.TopSubs = string.Join("; ", top.OrderByDescending(x => x.t).Take(4).Select(x => _subNames[x.i] + " " + F(x.t * MsPerTick)).ToArray());
+            top.Sort(CompareSubTicksDesc);
+            var topSb = new StringBuilder();
+            int topTake = Math.Min(4, top.Count);
+            for (int i = 0; i < topTake; i++)
+            {
+                if (i > 0) topSb.Append("; ");
+                topSb.Append(_subNames[top[i].i]).Append(' ').Append(F(top[i].t * MsPerTick));
+            }
+            s.TopSubs = topSb.ToString();
             s.Cause = Classify(s, top);
             return s;
         }
 
+        private static int CompareSubTicksDesc((int i, long t) a, (int i, long t) b) => b.t.CompareTo(a.t);
+
         /// <summary>Script subsystem time no hook covers (minus the probe's own time).</summary>
-        private static float Residual(Spike s) => Math.Max(0f, s.ScriptMs - s.SelfMs.Sum() - s.ProbeMs);
+        private static float Residual(Spike s)
+        {
+            float sum = 0f;
+            for (int i = 0; i < s.SelfMs.Length; i++) sum += s.SelfMs[i];
+            return Math.Max(0f, s.ScriptMs - sum - s.ProbeMs);
+        }
 
         private static string Classify(Spike s, List<(int i, long t)> top)
         {
             string best = null;
             float bestMs = 0;
-            void Consider(string name, float v)
+            for (int i = 0; i < SCount; i++) Consider(SignalNames[i], s.SelfMs[i], ref best, ref bestMs);
+            Consider(s.Gc0 + s.Gc1 + s.Gc2 > 0 ? "scripts+gc" : "scripts", Residual(s), ref best, ref bestMs);
+            Consider(s.NewVariantsNear ? "render+newVariants" : "render", s.RenderMs, ref best, ref bestMs);
+            Consider("physics", s.PhysicsMs, ref best, ref bestMs);
+            Consider("loading", s.LoadingMs, ref best, ref bestMs);
+            Consider(s.NewVariantsNear ? "present+newVariants" : "present", s.OutsideMs, ref best, ref bestMs);
+            float otherMax = 0f;
+            for (int i = 0; i < top.Count; i++)
             {
-                if (v > bestMs) (bestMs, best) = (v, name);
+                if (_subKind[top[i].i] != 0) continue;
+                float ms = (float)(top[i].t * MsPerTick);
+                if (ms > otherMax) otherMax = ms;
             }
-            for (int i = 0; i < SCount; i++) Consider(SignalNames[i], s.SelfMs[i]);
-            Consider(s.Gc0 + s.Gc1 + s.Gc2 > 0 ? "scripts+gc" : "scripts", Residual(s));
-            Consider(s.NewVariantsNear ? "render+newVariants" : "render", s.RenderMs);
-            Consider("physics", s.PhysicsMs);
-            Consider("loading", s.LoadingMs);
-            Consider(s.NewVariantsNear ? "present+newVariants" : "present", s.OutsideMs);
-            Consider("other", top.Where(x => _subKind[x.i] == 0).Select(x => (float)(x.t * MsPerTick)).DefaultIfEmpty(0f).Max());
+            Consider("other", otherMax, ref best, ref bestMs);
             return best ?? "other";
+        }
+
+        private static void Consider(string name, float v, ref string best, ref float bestMs)
+        {
+            if (v > bestMs)
+            {
+                bestMs = v;
+                best = name;
+            }
         }
 
         // ---- output ----
@@ -684,32 +792,37 @@ namespace Morgott.Preloader.Profiling
         /// <summary>Writes spikes.tsv + spike-summary.txt now (main thread, synchronous); for a test driver before it quits.</summary>
         public static void Flush() => Write(true);
 
-        private static void Write(bool sync)
+        private sealed class WriteJob
         {
-            if (!_active || _playStart == 0 || (!sync && Spikes.Count == _flushedSpikes)) return;
-            _flushedSpikes = Spikes.Count;
-            Spike[] spikes = Spikes.ToArray();
-            SegStats[] segs = Segments.Values.Select(s => s.Copy()).ToArray();
-            long[] sessionAcc = (long[])_sessionAcc.Clone();
-            long[] calls = (long[])SessionCalls.Clone();
-            long[] self = (long[])SessionSelf.Clone();
-            bool[] counterSeen = (bool[])CounterSeen.Clone();
-            bool[] markerValid = _markers.Select(m => m.Valid).ToArray();
-            bool[] markerSeen = (bool[])_markerSeen.Clone();
-            string probe = string.Format(CultureInfo.InvariantCulture, "probe overhead: mean {0:F1} us/frame, max {1:F2} ms over {2} play frames (frame-end bookkeeping + first-seen scans)",
-                _probeFrames > 0 ? _probeTicks * MsPerTick * 1000.0 / _probeFrames : 0, _probeMaxTicks * MsPerTick, _probeFrames);
-            object scripts = ScriptProbe.Snapshot();
-            string firstSeen = $"first seen this session: {SeenNetPrefabs.Count} net prefabs, {SeenNamed.Count} locations/rooms, {_sessionNewShaders} shaders, {_sessionNewVariants} shader/keyword combinations";
-            void Run()
+            public Spike[] Spikes;
+            public SegStats[] Segs;
+            public long[] SessionAcc;
+            public long[] Calls;
+            public long[] Self;
+            public bool[] CounterSeen;
+            public bool[] MarkerValid;
+            public bool[] MarkerSeen;
+            public string Probe;
+            public object Scripts;
+            public string FirstSeen;
+
+            public void Run()
             {
                 if (Interlocked.Exchange(ref _writing, 1) != 0) return;
                 try
                 {
                     Directory.CreateDirectory(Dir);
-                    AtomicFile.WriteAllText(Path.Combine(Dir, "spikes.tsv"), Tsv(spikes));
+                    AtomicFile.WriteAllText(Path.Combine(Dir, "spikes.tsv"), Tsv(Spikes));
                     AtomicFile.WriteAllText(Path.Combine(Dir, "spike-summary.txt"),
-                        Summary(spikes, segs, sessionAcc, calls, self, counterSeen, markerValid, markerSeen, probe, firstSeen));
-                    ScriptProbe.Write(scripts, spikes.Sum(Residual), spikes.Sum(s => s.ScriptMs));
+                        Summary(Spikes, Segs, SessionAcc, Calls, Self, CounterSeen, MarkerValid, MarkerSeen, Probe, FirstSeen));
+                    double residualSum = 0;
+                    double scriptSum = 0;
+                    for (int i = 0; i < Spikes.Length; i++)
+                    {
+                        residualSum += Residual(Spikes[i]);
+                        scriptSum += Spikes[i].ScriptMs;
+                    }
+                    ScriptProbe.Write(Scripts, residualSum, scriptSum);
                 }
                 catch (Exception e)
                 {
@@ -720,13 +833,41 @@ namespace Morgott.Preloader.Profiling
                     Interlocked.Exchange(ref _writing, 0);
                 }
             }
+        }
+
+        private static void RunWriteWorker(object state) => ((WriteJob)state).Run();
+
+        private static void Write(bool sync)
+        {
+            if (!_active || _playStart == 0 || (!sync && Spikes.Count == _flushedSpikes)) return;
+            _flushedSpikes = Spikes.Count;
+            var segs = new SegStats[Segments.Count];
+            int si = 0;
+            foreach (SegStats seg in Segments.Values) segs[si++] = seg.Copy();
+            var markerValid = new bool[_markers.Length];
+            for (int i = 0; i < _markers.Length; i++) markerValid[i] = _markers[i].Valid;
+            double meanUs = _probeFrames > 0 ? _probeTicks * MsPerTick * 1000.0 / _probeFrames : 0;
+            var job = new WriteJob
+            {
+                Spikes = Spikes.ToArray(),
+                Segs = segs,
+                SessionAcc = (long[])_sessionAcc.Clone(),
+                Calls = (long[])SessionCalls.Clone(),
+                Self = (long[])SessionSelf.Clone(),
+                CounterSeen = (bool[])CounterSeen.Clone(),
+                MarkerValid = markerValid,
+                MarkerSeen = (bool[])_markerSeen.Clone(),
+                Probe = $"probe overhead: mean {meanUs.ToString("F1", CultureInfo.InvariantCulture)} us/frame, max {(_probeMaxTicks * MsPerTick).ToString("F2", CultureInfo.InvariantCulture)} ms over {_probeFrames.ToString(CultureInfo.InvariantCulture)} play frames (frame-end bookkeeping + first-seen scans)",
+                Scripts = ScriptProbe.Snapshot(),
+                FirstSeen = $"first seen this session: {SeenNetPrefabs.Count.ToString(CultureInfo.InvariantCulture)} net prefabs, {SeenNamed.Count.ToString(CultureInfo.InvariantCulture)} locations/rooms, {_sessionNewShaders.ToString(CultureInfo.InvariantCulture)} shaders, {_sessionNewVariants.ToString(CultureInfo.InvariantCulture)} shader/keyword combinations",
+            };
             if (!sync)
             {
-                ThreadPool.QueueUserWorkItem(_ => Run());
+                ThreadPool.QueueUserWorkItem(RunWriteWorker, job);
                 return;
             }
             while (Volatile.Read(ref _writing) != 0) Thread.Sleep(10);
-            Run();
+            job.Run();
         }
 
         internal static string F(double v) => v.ToString("F1", CultureInfo.InvariantCulture);
@@ -738,15 +879,26 @@ namespace Morgott.Preloader.Profiling
             foreach (string c in CounterNames) sb.Append('\t').Append(c.Replace(' ', '_'));
             foreach (string n in SignalNames) sb.Append('\t').Append(n).Append("_n\t").Append(n).Append("_ms\t").Append(n).Append("_max");
             sb.Append("\tnewPrefabs\tnewShaders\tnewVariants\tprevNewVariants\tnewShaderNames\tscriptMs\trenderMs\tphysicsMs\tloadingMs\toutsideMs\tprobeMs\ttopSubsystems\tscriptTop\n");
-            foreach (Spike s in spikes)
+            for (int si = 0; si < spikes.Length; si++)
             {
-                sb.Append(string.Join("\t", s.T.ToString("F2", CultureInfo.InvariantCulture), s.Utc, F(s.Ms), s.Cause, s.Segment, B(s.Teleporting), B(s.Interior),
-                    B(s.ZoneChanged), F(s.Speed), s.Mobs, B(s.Combat), s.Pos, s.Zone, s.Gc0, s.Gc1, s.Gc2));
+                Spike s = spikes[si];
+                sb.Append(s.T.ToString("F2", CultureInfo.InvariantCulture)).Append('\t').Append(s.Utc).Append('\t').Append(F(s.Ms))
+                  .Append('\t').Append(s.Cause).Append('\t').Append(s.Segment).Append('\t').Append(B(s.Teleporting))
+                  .Append('\t').Append(B(s.Interior)).Append('\t').Append(B(s.ZoneChanged)).Append('\t').Append(F(s.Speed))
+                  .Append('\t').Append(s.Mobs).Append('\t').Append(B(s.Combat)).Append('\t').Append(s.Pos).Append('\t').Append(s.Zone)
+                  .Append('\t').Append(s.Gc0).Append('\t').Append(s.Gc1).Append('\t').Append(s.Gc2);
                 for (int i = 0; i < s.Counters.Length; i++)
-                    sb.Append('\t').Append(i < MemoryCounters ? (s.Counters[i] / 1024).ToString(CultureInfo.InvariantCulture) + "KB" : s.Counters[i].ToString(CultureInfo.InvariantCulture));
+                {
+                    sb.Append('\t');
+                    if (i < MemoryCounters) sb.Append(s.Counters[i] / 1024).Append("KB");
+                    else sb.Append(s.Counters[i]);
+                }
                 for (int i = 0; i < SCount; i++) sb.Append('\t').Append(s.Calls[i]).Append('\t').Append(F(s.SelfMs[i])).Append('\t').Append(s.MaxName[i] ?? "");
-                sb.Append('\t').Append(string.Join("\t", s.NewPrefabs, s.NewShaders, s.NewVariants, s.PrevNewVariants, s.NewShaderNames, F(s.ScriptMs), F(s.RenderMs),
-                    F(s.PhysicsMs), F(s.LoadingMs), F(s.OutsideMs), s.ProbeMs.ToString("F2", CultureInfo.InvariantCulture), s.TopSubs, s.ScriptTop ?? "")).Append('\n');
+                sb.Append('\t').Append(s.NewPrefabs).Append('\t').Append(s.NewShaders).Append('\t').Append(s.NewVariants)
+                  .Append('\t').Append(s.PrevNewVariants).Append('\t').Append(s.NewShaderNames).Append('\t').Append(F(s.ScriptMs))
+                  .Append('\t').Append(F(s.RenderMs)).Append('\t').Append(F(s.PhysicsMs)).Append('\t').Append(F(s.LoadingMs))
+                  .Append('\t').Append(F(s.OutsideMs)).Append('\t').Append(s.ProbeMs.ToString("F2", CultureInfo.InvariantCulture))
+                  .Append('\t').Append(s.TopSubs).Append('\t').Append(s.ScriptTop ?? "").Append('\n');
             }
             return sb.ToString();
         }
@@ -764,65 +916,141 @@ namespace Morgott.Preloader.Profiling
             return 0;
         }
 
+        private sealed class CauseAgg
+        {
+            public string Cause;
+            public int Count, Telep, NewVar;
+            public double TotalMs, ExcessMs;
+            public float MaxMs;
+        }
+
         private static string Summary(Spike[] spikes, SegStats[] segs, long[] sessionAcc, long[] calls, long[] self, bool[] counterSeen,
             bool[] markerValid, bool[] markerSeen, string probe, string firstSeen)
         {
             var sb = new StringBuilder();
-            void L(string format, params object[] args) => sb.Append(string.Format(CultureInfo.InvariantCulture, format, args)).Append('\n');
             sb.Append("Morgott.Preloader spike probe - ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append(" - threshold ")
                 .Append(F(_thresholdMs)).Append(" ms - logical cores Environment=").Append(Environment.ProcessorCount).Append(" SystemInfo=")
                 .Append(SystemInfo.processorCount).Append(" JobWorkerCount=").Append(JobsUtility.JobWorkerCount).Append('/').Append(JobsUtility.JobWorkerMaximumCount).Append('\n').Append(probe).Append('\n').Append(firstSeen).Append("\n\n");
             sb.Append("== frame time per segment (play frames, p = upper bound of a 0.5 ms bucket)\n");
-            L("{0,-18} {1,7} {2,7} {3,7} {4,7} {5,7} {6,8} {7,6} {8,9}", "segment", "frames", "avg", "p50", "p99", "p99.9", "max", "spikes", "spikeMs");
+            sb.Append(PadR("segment", 18)).Append(' ').Append(PadL("frames", 7)).Append(' ').Append(PadL("avg", 7)).Append(' ')
+              .Append(PadL("p50", 7)).Append(' ').Append(PadL("p99", 7)).Append(' ').Append(PadL("p99.9", 7)).Append(' ')
+              .Append(PadL("max", 8)).Append(' ').Append(PadL("spikes", 6)).Append(' ').Append(PadL("spikeMs", 9)).Append('\n');
             var all = new SegStats { Name = "ALL" };
-            foreach (SegStats s in segs)
+            for (int si = 0; si < segs.Length; si++)
             {
+                SegStats s = segs[si];
                 all.Frames += s.Frames;
                 all.TotalMs += s.TotalMs;
                 all.MaxMs = Math.Max(all.MaxMs, s.MaxMs);
                 all.Spikes += s.Spikes;
                 all.SpikeMs += s.SpikeMs;
                 for (int i = 0; i < HistBuckets; i++) all.Hist[i] += s.Hist[i];
+                AppendSegRow(sb, s);
             }
-            foreach (SegStats s in segs.Concat(new[] { all }))
-            {
-                L("{0,-18} {1,7} {2,7:F1} {3,7:F1} {4,7:F1} {5,7:F1} {6,8:F1} {7,6} {8,9:F0}", s.Name, s.Frames,
-                    s.Frames > 0 ? s.TotalMs / s.Frames : 0, Pct(s.Hist, s.Frames, 0.5), Pct(s.Hist, s.Frames, 0.99), Pct(s.Hist, s.Frames, 0.999), s.MaxMs, s.Spikes, s.SpikeMs);
-            }
+            AppendSegRow(sb, all);
+
             double p50 = Pct(all.Hist, all.Frames, 0.5);
             sb.Append("\n== causes ranked by total spike ms (cause = largest of: hook self times, script residual, render, physics, loading, outside, other)\n");
-            L("{0,-20} {1,6} {2,9} {3,9} {4,8} {5,6} {6,6}  {7}", "cause", "count", "totalMs", "excessMs", "maxMs", "telep", "newVar", "owner");
-            foreach (var g in spikes.GroupBy(s => s.Cause).OrderByDescending(g => g.Sum(s => s.Ms)))
+            sb.Append(PadR("cause", 20)).Append(' ').Append(PadL("count", 6)).Append(' ').Append(PadL("totalMs", 9)).Append(' ')
+              .Append(PadL("excessMs", 9)).Append(' ').Append(PadL("maxMs", 8)).Append(' ').Append(PadL("telep", 6)).Append(' ')
+              .Append(PadL("newVar", 6)).Append("  owner\n");
+            var causeMap = new Dictionary<string, CauseAgg>();
+            var segCauseMap = new Dictionary<string, Dictionary<string, CauseAgg>>();
+            var segOrder = new List<string>();
+            var signalSpikeCalls = new long[SCount];
+            var signalSpikeMs = new double[SCount];
+            int withNewCount = 0;
+            double withNewMs = 0;
+            double totalSpikeMs = 0;
+            for (int si = 0; si < spikes.Length; si++)
             {
-                Owners.TryGetValue(g.Key, out string owner);
-                L("{0,-20} {1,6} {2,9:F0} {3,9:F0} {4,8:F1} {5,6} {6,6}  {7}", g.Key, g.Count(), g.Sum(s => s.Ms),
-                    g.Sum(s => Math.Max(0, s.Ms - p50)), g.Max(s => s.Ms), g.Count(s => s.Teleporting), g.Count(s => s.NewVariants + s.PrevNewVariants > 0), owner);
+                Spike s = spikes[si];
+                totalSpikeMs += s.Ms;
+                if (s.NewVariantsNear)
+                {
+                    withNewCount++;
+                    withNewMs += s.Ms;
+                }
+                for (int i = 0; i < SCount; i++)
+                {
+                    signalSpikeCalls[i] += s.Calls[i];
+                    signalSpikeMs[i] += s.SelfMs[i];
+                }
+                if (!causeMap.TryGetValue(s.Cause, out CauseAgg ca))
+                    causeMap[s.Cause] = ca = new CauseAgg { Cause = s.Cause };
+                ca.Count++;
+                ca.TotalMs += s.Ms;
+                ca.ExcessMs += Math.Max(0, s.Ms - p50);
+                if (s.Ms > ca.MaxMs) ca.MaxMs = s.Ms;
+                if (s.Teleporting) ca.Telep++;
+                if (s.NewVariants + s.PrevNewVariants > 0) ca.NewVar++;
+
+                if (!segCauseMap.TryGetValue(s.Segment, out Dictionary<string, CauseAgg> scMap))
+                {
+                    segCauseMap[s.Segment] = scMap = new Dictionary<string, CauseAgg>();
+                    segOrder.Add(s.Segment);
+                }
+                if (!scMap.TryGetValue(s.Cause, out CauseAgg sca))
+                    scMap[s.Cause] = sca = new CauseAgg { Cause = s.Cause };
+                sca.Count++;
+                sca.TotalMs += s.Ms;
+            }
+            var causeList = new List<CauseAgg>(causeMap.Values);
+            causeList.Sort(CompareCauseMsDesc);
+            for (int i = 0; i < causeList.Count; i++)
+            {
+                CauseAgg g = causeList[i];
+                Owners.TryGetValue(g.Cause, out string owner);
+                sb.Append(PadR(g.Cause, 20)).Append(' ').Append(PadN(g.Count, 6)).Append(' ').Append(PadF(g.TotalMs, 9, "F0")).Append(' ')
+                  .Append(PadF(g.ExcessMs, 9, "F0")).Append(' ').Append(PadF(g.MaxMs, 8, "F1")).Append(' ')
+                  .Append(PadN(g.Telep, 6)).Append(' ').Append(PadN(g.NewVar, 6)).Append("  ").Append(owner ?? "").Append('\n');
             }
             sb.Append("\n== causes per segment\n");
-            foreach (var seg in spikes.GroupBy(s => s.Segment))
+            for (int i = 0; i < segOrder.Count; i++)
             {
-                sb.Append(seg.Key).Append(": ").Append(string.Join(", ", seg.GroupBy(s => s.Cause).OrderByDescending(g => g.Sum(s => s.Ms))
-                    .Select(g => g.Key + " " + g.Count() + "x/" + F(g.Sum(s => s.Ms)) + "ms").ToArray())).Append('\n');
+                string segName = segOrder[i];
+                var list = new List<CauseAgg>(segCauseMap[segName].Values);
+                list.Sort(CompareCauseMsDesc);
+                sb.Append(segName).Append(": ");
+                for (int j = 0; j < list.Count; j++)
+                {
+                    if (j > 0) sb.Append(", ");
+                    sb.Append(list[j].Cause).Append(' ').Append(list[j].Count).Append("x/").Append(F(list[j].TotalMs)).Append("ms");
+                }
+                sb.Append('\n');
             }
             sb.Append("\n== hook signals over all spike frames (self ms) and over the whole session\n");
             for (int i = 0; i < SCount; i++)
             {
-                int idx = i;
-                L("{0,-18} spikes: {1,6} calls {2,9:F1} ms   session: {3,8} calls {4,9:F1} ms", SignalNames[i],
-                    spikes.Sum(s => s.Calls[idx]), spikes.Sum(s => s.SelfMs[idx]), calls[i], self[i] * MsPerTick);
+                sb.Append(PadR(SignalNames[i], 18)).Append(" spikes: ").Append(PadN(signalSpikeCalls[i], 6)).Append(" calls ")
+                  .Append(PadF(signalSpikeMs[i], 9, "F1")).Append(" ms   session: ").Append(PadN(calls[i], 8)).Append(" calls ")
+                  .Append(PadF(self[i] * MsPerTick, 9, "F1")).Append(" ms\n");
             }
-            Spike[] withNew = spikes.Where(s => s.NewVariantsNear).ToArray();
-            sb.Append('\n');
-            L("== first-seen shader correlation: {0} of {1} spike frames had first-seen shader variants in the frame or the one before ({2:F0} of {3:F0} ms)",
-                withNew.Length, spikes.Length, withNew.Sum(s => s.Ms), spikes.Sum(s => s.Ms));
+            sb.Append("\n== first-seen shader correlation: ").Append(withNewCount).Append(" of ").Append(spikes.Length)
+              .Append(" spike frames had first-seen shader variants in the frame or the one before (")
+              .Append(withNewMs.ToString("F0", CultureInfo.InvariantCulture)).Append(" of ")
+              .Append(totalSpikeMs.ToString("F0", CultureInfo.InvariantCulture)).Append(" ms)\n");
             sb.Append("\n== session time per player-loop subsystem (top 25, all frames incl. menu/loading)\n");
-            foreach (int i in Enumerable.Range(0, sessionAcc.Length).OrderByDescending(i => sessionAcc[i]).Take(25))
-                L("{0,-60} {1,10:F0} ms", _subNames[i], sessionAcc[i] * MsPerTick);
-            sb.Append("\n== top 40 spike frames\n");
-            foreach (Spike s in spikes.OrderByDescending(s => s.Ms).Take(40))
+            var subOrder = new (int Idx, long Ticks)[sessionAcc.Length];
+            for (int i = 0; i < sessionAcc.Length; i++) subOrder[i] = (i, sessionAcc[i]);
+            Array.Sort(subOrder, CompareSubTicksDesc);
+            int subTake = Math.Min(25, subOrder.Length);
+            for (int i = 0; i < subTake; i++)
             {
-                sb.Append(string.Format(CultureInfo.InvariantCulture, "{0,8:F1} ms t={1,7:F1}s {2} [{3}] {4}{5}{6} spd {7:F1} mobs {8} gc {9}/{10}/{11} | ", s.Ms, s.T, s.Cause, s.Segment,
-                    s.Teleporting ? "TP " : "", s.Interior ? "IN " : "", s.ZoneChanged ? "ZONE " : "", s.Speed, s.Mobs, s.Gc0, s.Gc1, s.Gc2));
+                sb.Append(PadR(_subNames[subOrder[i].Idx], 60)).Append(' ').Append(PadF(subOrder[i].Ticks * MsPerTick, 10, "F0")).Append(" ms\n");
+            }
+            sb.Append("\n== top 40 spike frames\n");
+            var topSpikes = (Spike[])spikes.Clone();
+            Array.Sort(topSpikes, CompareSpikeMsDesc);
+            int topSpikeTake = Math.Min(40, topSpikes.Length);
+            for (int si = 0; si < topSpikeTake; si++)
+            {
+                Spike s = topSpikes[si];
+                sb.Append(PadF(s.Ms, 8, "F1")).Append(" ms t=").Append(PadF(s.T, 7, "F1")).Append("s ").Append(s.Cause)
+                  .Append(" [").Append(s.Segment).Append("] ")
+                  .Append(s.Teleporting ? "TP " : "").Append(s.Interior ? "IN " : "").Append(s.ZoneChanged ? "ZONE " : "")
+                  .Append("spd ").Append(F(s.Speed)).Append(" mobs ").Append(s.Mobs).Append(" gc ")
+                  .Append(s.Gc0).Append('/').Append(s.Gc1).Append('/').Append(s.Gc2).Append(" | ");
                 for (int i = 0; i < SCount; i++)
                 {
                     if (s.Calls[i] == 0 || s.SelfMs[i] < 0.5f) continue;
@@ -845,5 +1073,28 @@ namespace Morgott.Preloader.Profiling
             sb.Append("metrics available=").Append(_availableMetrics).Append(" frameTimingStats=").Append(_frameTimingEnabled).Append('\n');
             return sb.ToString();
         }
+
+        private static void AppendSegRow(StringBuilder sb, SegStats s)
+        {
+            sb.Append(PadR(s.Name, 18)).Append(' ').Append(PadN(s.Frames, 7)).Append(' ')
+              .Append(PadF(s.Frames > 0 ? s.TotalMs / s.Frames : 0, 7, "F1")).Append(' ')
+              .Append(PadF(Pct(s.Hist, s.Frames, 0.5), 7, "F1")).Append(' ')
+              .Append(PadF(Pct(s.Hist, s.Frames, 0.99), 7, "F1")).Append(' ')
+              .Append(PadF(Pct(s.Hist, s.Frames, 0.999), 7, "F1")).Append(' ')
+              .Append(PadF(s.MaxMs, 8, "F1")).Append(' ').Append(PadN(s.Spikes, 6)).Append(' ')
+              .Append(PadF(s.SpikeMs, 9, "F0")).Append('\n');
+        }
+
+        private static int CompareCauseMsDesc(CauseAgg a, CauseAgg b) => b.TotalMs.CompareTo(a.TotalMs);
+
+        private static int CompareSpikeMsDesc(Spike a, Spike b) => b.Ms.CompareTo(a.Ms);
+
+        private static string PadF(double v, int width, string fmt) => v.ToString(fmt, CultureInfo.InvariantCulture).PadLeft(width);
+
+        private static string PadN(long v, int width) => v.ToString(CultureInfo.InvariantCulture).PadLeft(width);
+
+        private static string PadL(string s, int width) => (s ?? "").PadLeft(width);
+
+        private static string PadR(string s, int width) => (s ?? "").PadRight(width);
     }
 }

@@ -130,9 +130,8 @@ namespace Morgott.Preloader
                 if (worldGen)
                 {
                     // Game types: only once the engine is up.
-                    bool profiler = Config.ProfilerEnabled?.Value == true;
                     Lifecycle.ChainloaderInitialized += () =>
-                        Log.Guard("WorldGen install", () => WorldGenModule.Install(new Harmony(WorldGenHarmonyId), profiler));
+                        Log.Guard("WorldGen install", () => WorldGenModule.Install(new Harmony(WorldGenHarmonyId), Config.ProfilerEnabled?.Value == true));
                 }
             });
         }

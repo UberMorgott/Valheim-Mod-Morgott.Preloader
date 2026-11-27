@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -99,13 +100,22 @@ internal static class BundleCacheModule
     private static bool StreamAsyncPrefix(Stream stream, uint crc, ref AssetBundleCreateRequest __result, bool __runOriginal) =>
         Serve(__runOriginal, stream, crc, ref __result, "LoadFromFileAsync", path => AssetBundle.LoadFromFileAsync(path), WatchAsync);
 
-    private static void WatchAsync(Hit hit, AssetBundleCreateRequest request) => request.completed += _ => Log.Guard("BundleCache async hit", () =>
+    private static void WatchAsync(Hit hit, AssetBundleCreateRequest request) => new AsyncHitWatcher(hit, request).Attach();
+
+    private sealed class AsyncHitWatcher(Hit hit, AssetBundleCreateRequest request)
     {
-        if (request.assetBundle == null)
+        public void Attach() => request.completed += OnCompleted;
+
+        private void OnCompleted(AsyncOperation _) => Log.Guard("BundleCache async hit", Check);
+
+        private void Check()
         {
-            Invalidate(hit, "LoadFromFileAsync completed without a bundle", fallback: false);
+            if (request.assetBundle == null)
+            {
+                Invalidate(hit, "LoadFromFileAsync completed without a bundle", fallback: false);
+            }
         }
-    });
+    }
 
     /// <summary>Prefix body: false (skip the original) when the cached copy was handed out as the result.</summary>
     private static bool Serve<T>(bool runOriginal, Stream stream, uint crc, ref T result, string what, Func<string, T> load, Action<Hit, T> served) where T : class
@@ -221,24 +231,25 @@ internal static class BundleCacheModule
     }
 
     /// <summary>Worker thread: a failed eager job's dropped miss is rebuilt by the Unity queue after all.</summary>
-    private static void OnEagerFailed(string fileName)
+    private static void OnEagerFailed(string fileName) => _main?.Post(OnEagerFailedMain, fileName);
+
+    private static void OnEagerFailedMain(object state) => Log.Guard("BundleCache eager failed", HandleEagerFailed, (string)state);
+
+    private static void HandleEagerFailed(string fileName)
     {
-        _main?.Post(_ => Log.Guard("BundleCache eager failed", () =>
+        lock (Pending)
         {
-            lock (Pending)
+            if (!Parked.TryGetValue(fileName, out ResourceSource source))
             {
-                if (!Parked.TryGetValue(fileName, out ResourceSource source))
-                {
-                    return;
-                }
-                Parked.Remove(fileName);
-                Pending.Add(source);
+                return;
             }
-            if (_menuReady && !_running)
-            {
-                Next();
-            }
-        }), null);
+            Parked.Remove(fileName);
+            Pending.Add(source);
+        }
+        if (_menuReady && !_running)
+        {
+            Next();
+        }
     }
 
     private static void Enqueue(ResourceSource source)
@@ -263,11 +274,11 @@ internal static class BundleCacheModule
         {
             return;
         }
-        Log.Info($"BundleCache: {_hits} hits ({_hitBytes / (1024.0 * 1024.0):F1} MB served from LZ4 copies), {_misses} LZMA misses queued, " +
-                 $"{_alreadyFast} already LZ4/uncompressed, {_passedThrough} not cacheable, {_hitFailures} copies failed to load (originals used)");
+        Log.Info($"BundleCache: {_hits.ToString(CultureInfo.InvariantCulture)} hits ({(_hitBytes / (1024.0 * 1024.0)).ToString("F1", CultureInfo.InvariantCulture)} MB served from LZ4 copies), {_misses.ToString(CultureInfo.InvariantCulture)} LZMA misses queued, " +
+                 $"{_alreadyFast.ToString(CultureInfo.InvariantCulture)} already LZ4/uncompressed, {_passedThrough.ToString(CultureInfo.InvariantCulture)} not cacheable, {_hitFailures.ToString(CultureInfo.InvariantCulture)} copies failed to load (originals used)");
         if (EagerBuilder.Started && !_eagerOff)
         {
-            Log.Info(EagerBuilder.Summary() + $"; {_eagerHits} of the local hits were copies finished while their load waited");
+            Log.Info(EagerBuilder.Summary() + $"; {_eagerHits.ToString(CultureInfo.InvariantCulture)} of the local hits were copies finished while their load waited");
         }
         _main = SynchronizationContext.Current;
         EagerBuilder.JobFailed += OnEagerFailed;
@@ -308,12 +319,19 @@ internal static class BundleCacheModule
         {
             // Keys the eager builder produces (or produced) need no Unity recompress of the original; a failed
             // eager job releases its key, so that miss is rebuilt here as before.
-            foreach (ResourceSource owned in Pending.Where(s => !_eagerOff && EagerBuilder.Owns(s.FileName)).ToList())
+            if (!_eagerOff)
             {
-                Pending.Remove(owned);
-                Parked[owned.FileName] = owned; // back into the queue if the eager job fails (OnEagerFailed)
+                for (int i = Pending.Count - 1; i >= 0; i--)
+                {
+                    ResourceSource owned = Pending[i];
+                    if (EagerBuilder.Owns(owned.FileName))
+                    {
+                        Pending.RemoveAt(i);
+                        Parked[owned.FileName] = owned; // back into the queue if the eager job fails (OnEagerFailed)
+                    }
+                }
             }
-            source = Pending.FirstOrDefault();
+            source = Pending.Count > 0 ? Pending[0] : null;
             if (source != null)
             {
                 Pending.RemoveAt(0);
@@ -324,20 +342,7 @@ internal static class BundleCacheModule
             _running = true;
             PopulateTime.Start();
             string input = CacheStore.TempOf(_store.PathOf(source), "src");
-            ThreadPool.QueueUserWorkItem(_ =>
-            {
-                bool copied = CopyResource(source, input);
-                _main.Post(__ => Log.Guard("BundleCache recompress", () =>
-                {
-                    string output = CacheStore.TempOf(_store.PathOf(source), "out");
-                    if (!copied || !Recompress(input, output, source.Label, (success, result) => Store(source, input, output, success, result)))
-                    {
-                        CacheStore.TryDelete(input);
-                        CacheStore.TryDelete(output);
-                        Next();
-                    }
-                }), null);
-            });
+            new CopyAndRecompressJob(source, input).Start();
             return;
         }
         if (!_eagerOff && EagerBuilder.Started)
@@ -351,20 +356,8 @@ internal static class BundleCacheModule
                 string output = CacheStore.TempOf(input, "lz4");
                 _running = true;
                 PopulateTime.Start();
-                if (Recompress(input, output, "LZ4 upgrade " + fileName, (success, _) =>
-                    {
-                        if (success && BundleHeader.IsCompleteCopy(output) && BundleHeader.Nodes(output) == BundleHeader.Nodes(input))
-                        {
-                            string target = _store.UpgradePath(fileName);
-                            CacheStore.TryDelete(target);
-                            File.Move(output, target);
-                            _upgraded++;
-                        }
-                        else
-                        {
-                            CacheStore.TryDelete(output);
-                        }
-                    }))
+                var upgrade = new UpgradeJob(fileName, input, output);
+                if (Recompress(input, output, "LZ4 upgrade " + fileName, upgrade.OnStored))
                 {
                     return;
                 }
@@ -375,13 +368,60 @@ internal static class BundleCacheModule
         if (PopulateTime.IsRunning)
         {
             PopulateTime.Stop();
-            Log.Info($"BundleCache: cached {_created} bundles ({_createdBytes / (1024.0 * 1024.0):F1} MB LZ4), {_upgraded} eager copies recompressed to LZ4 " +
-                     $"for the next launch, in {PopulateTime.Elapsed.TotalSeconds:F1} s");
+            Log.Info($"BundleCache: cached {_created.ToString(CultureInfo.InvariantCulture)} bundles ({(_createdBytes / (1024.0 * 1024.0)).ToString("F1", CultureInfo.InvariantCulture)} MB LZ4), {_upgraded.ToString(CultureInfo.InvariantCulture)} eager copies recompressed to LZ4 " +
+                     $"for the next launch, in {PopulateTime.Elapsed.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture)} s");
         }
         if (!_maintained)
         {
             _maintained = true;
             ThreadPool.QueueUserWorkItem(_ => Log.Guard("BundleCache maintenance", Maintain));
+        }
+    }
+
+    private sealed class CopyAndRecompressJob(ResourceSource source, string input)
+    {
+        private bool _copied;
+        private string _output;
+
+        public void Start() => ThreadPool.QueueUserWorkItem(CopyWorker);
+
+        private void CopyWorker(object _)
+        {
+            _copied = CopyResource(source, input);
+            _main.Post(OnCopiedMain, null);
+        }
+
+        private void OnCopiedMain(object _) => Log.Guard("BundleCache recompress", RunRecompress);
+
+        private void RunRecompress()
+        {
+            _output = CacheStore.TempOf(_store.PathOf(source), "out");
+            if (!_copied || !Recompress(input, _output, source.Label, OnStored))
+            {
+                CacheStore.TryDelete(input);
+                CacheStore.TryDelete(_output);
+                Next();
+            }
+        }
+
+        private void OnStored(bool success, string result) => Store(source, input, _output, success, result);
+    }
+
+    private sealed class UpgradeJob(string fileName, string input, string output)
+    {
+        public void OnStored(bool success, string _)
+        {
+            if (success && BundleHeader.IsCompleteCopy(output) && BundleHeader.Nodes(output) == BundleHeader.Nodes(input))
+            {
+                string target = _store.UpgradePath(fileName);
+                CacheStore.TryDelete(target);
+                File.Move(output, target);
+                _upgraded++;
+            }
+            else
+            {
+                CacheStore.TryDelete(output);
+            }
         }
     }
 
@@ -405,17 +445,33 @@ internal static class BundleCacheModule
         {
             return false;
         }
-        op.completed += _ =>
-        {
-            bool success = op.success;
-            string result = op.humanReadableResult;
-            ThreadPool.QueueUserWorkItem(__ =>
-            {
-                Log.Guard("BundleCache store", () => store(success, result));
-                _main.Post(___ => Log.Guard("BundleCache next", Next), null);
-            });
-        };
+        new RecompressHandler(op, store).Attach();
         return true;
+    }
+
+    private sealed class RecompressHandler(AssetBundleRecompressOperation op, Action<bool, string> store)
+    {
+        private bool _success;
+        private string _result;
+
+        public void Attach() => op.completed += OnCompleted;
+
+        private void OnCompleted(AsyncOperation _)
+        {
+            _success = op.success;
+            _result = op.humanReadableResult;
+            ThreadPool.QueueUserWorkItem(StoreWorker);
+        }
+
+        private void StoreWorker(object _)
+        {
+            Log.Guard("BundleCache store", InvokeStore);
+            _main.Post(PostNext, null);
+        }
+
+        private void InvokeStore() => store(_success, _result);
+
+        private static void PostNext(object _) => Log.Guard("BundleCache next", Next);
     }
 
     /// <summary>Worker thread: RecompressAssetBundleAsync takes a file path, so the resource is copied out first.</summary>
@@ -473,6 +529,6 @@ internal static class BundleCacheModule
     private static void Maintain()
     {
         long size = _store.Maintain(_loadedMvids, Config.BundleCacheMaxSizeMB.Value * 1024L * 1024L, out int deleted);
-        Log.Info($"BundleCache: {size / (1024.0 * 1024.0):F1} MB on disk (cap {Config.BundleCacheMaxSizeMB.Value} MB), {deleted} stale files removed");
+        Log.Info($"BundleCache: {(size / (1024.0 * 1024.0)).ToString("F1", CultureInfo.InvariantCulture)} MB on disk (cap {Config.BundleCacheMaxSizeMB.Value.ToString(CultureInfo.InvariantCulture)} MB), {deleted.ToString(CultureInfo.InvariantCulture)} stale files removed");
     }
 }

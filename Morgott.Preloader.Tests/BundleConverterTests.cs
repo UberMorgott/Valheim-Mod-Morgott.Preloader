@@ -20,9 +20,9 @@ namespace Morgott.Preloader.Tests
             string output = Path.Combine(Path.GetTempPath(), "mp-convert-" + System.Guid.NewGuid().ToString("N"));
             try
             {
-                long progress = 0;
-                BundleConverter.Convert(new MemoryStream(bundle), source, output, n => progress = n);
-                Assert.Equal(expected.Length, progress);
+                var tracker = new ProgressTracker();
+                BundleConverter.Convert(new MemoryStream(bundle), source, output, tracker.Record);
+                Assert.Equal(expected.Length, tracker.Value);
                 Assert.True(BundleHeader.IsCompleteCopy(output));
                 Assert.Equal(BundleHeader.Nodes(new MemoryStream(bundle)), BundleHeader.Nodes(output));
                 using (FileStream file = File.OpenRead(output))
@@ -55,6 +55,12 @@ namespace Morgott.Preloader.Tests
             Assert.StartsWith("unsupported header", problem);
             Assert.Null(BundleConverter.Parse(new MemoryStream(Bundles.Build(7, 0x43, 5, Bundles.Lz4Literals(new byte[8]), 8)), out problem));
             Assert.Equal("unknown block compression", problem);
+        }
+
+        private sealed class ProgressTracker
+        {
+            public long Value;
+            public void Record(long n) => Value = n;
         }
     }
 }

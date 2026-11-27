@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Morgott.Preloader.Tests
 {
-    public class WatchCycleCacheTests : IDisposable
+    public sealed class WatchCycleCacheTests : IDisposable
     {
         private readonly string _dir = Path.Combine(Path.GetTempPath(), "wcc-" + Guid.NewGuid().ToString("N"));
 

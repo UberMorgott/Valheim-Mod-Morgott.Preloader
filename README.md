@@ -526,7 +526,7 @@ profile; 4 / 2 cores = `autotest.ps1 -Affinity N` (Unity and Mono still report 1
 job-worker pool: the 2-core profile is harsher than a real 2-core PC). Per run, spikes >= 33 ms:
 
 | profile | spikes | spike ms | run-new | run-repeat | idle (150 s) | top causes (ms per run) |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | 16 cores | 150 | 11 308 | 69 / 3 742 | 13 / 644 | 0 | create 2 837, scripts 2 517, spawn-frame GC 2 353, zone 1 651 |
 | 4 cores | 164 | 11 769 | 27 / 1 371 | 13 / 631 | 22 / 1 096 | create 3 730, scripts 2 976, spawn-frame GC 1 885, render 1 870 |
 | 2 cores | 1 438 | 105 995 | 243 / 22 926 | 214 / 14 731 | 307 / 16 155 | render 55 154, scripts 21 328, physics 8 390, create 4 949 |

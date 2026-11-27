@@ -1,5 +1,5 @@
 using System;
-using System.Linq;
+using System.Globalization;
 using System.Reflection;
 using Morgott.Preloader.Core;
 using HarmonyLib;
@@ -39,25 +39,56 @@ namespace Morgott.Preloader.Profiling
 
         public static void Install(Harmony harmony)
         {
-            Assembly jotunn = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Jotunn");
+            Assembly jotunn = null;
+            foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (a.GetName().Name == "Jotunn")
+                {
+                    jotunn = a;
+                    break;
+                }
+            }
             if (jotunn == null) return;
-            int hooked = Targets.Sum(t => t.Methods.Sum(m => Hook(harmony, jotunn, "Jotunn.Managers." + t.Type, m, t.Type == "MockManager")));
-            Log.Info($"Jotunn probe: {hooked}/{Targets.Sum(t => t.Methods.Length)} Jotunn methods hooked");
+            int hooked = 0;
+            int total = 0;
+            for (int i = 0; i < Targets.Length; i++)
+            {
+                (string typeName, string[] methods) = Targets[i];
+                total += methods.Length;
+                string fullType = "Jotunn.Managers." + typeName;
+                bool isStatic = typeName == "MockManager";
+                for (int j = 0; j < methods.Length; j++)
+                    hooked += Hook(harmony, jotunn, fullType, methods[j], isStatic);
+            }
+            Log.Info($"Jotunn probe: {hooked.ToString(CultureInfo.InvariantCulture)}/{total.ToString(CultureInfo.InvariantCulture)} Jotunn methods hooked");
         }
 
         private static int Hook(Harmony harmony, Assembly assembly, string type, string method, bool isStatic)
         {
             bool outerOnly = isStatic && method == "FixReferences";
             BindingFlags flags = (isStatic ? BindingFlags.Static : BindingFlags.Instance) | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-            MethodInfo[] found = assembly.GetType(type)?.GetMethods(flags).Where(m => m.Name == method && !m.IsGenericMethodDefinition).ToArray();
-            if (found == null || found.Length != 1)
+            MethodInfo[] all = assembly.GetType(type)?.GetMethods(flags);
+            MethodInfo match = null;
+            int matches = 0;
+            if (all != null)
             {
-                Log.Warning($"Jotunn probe: {type}.{method} not found or ambiguous ({found?.Length ?? 0} matches), skipped");
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i].Name == method && !all[i].IsGenericMethodDefinition)
+                    {
+                        match = all[i];
+                        matches++;
+                    }
+                }
+            }
+            if (matches != 1)
+            {
+                Log.Warning($"Jotunn probe: {type}.{method} not found or ambiguous ({matches.ToString(CultureInfo.InvariantCulture)} matches), skipped");
                 return 0;
             }
             try
             {
-                harmony.Patch(found[0],
+                harmony.Patch(match,
                     prefix: new HarmonyMethod(AccessTools.Method(typeof(JotunnProbe), outerOnly ? nameof(OuterPrefix) : nameof(Prefix)), Priority.First),
                     finalizer: new HarmonyMethod(AccessTools.Method(typeof(JotunnProbe), outerOnly ? nameof(OuterFinalizer) : nameof(Finalizer)), Priority.Last));
                 return 1;

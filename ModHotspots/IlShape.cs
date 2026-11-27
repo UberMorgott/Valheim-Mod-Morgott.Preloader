@@ -49,7 +49,7 @@ namespace Morgott.Preloader.ModHotspots
                     default: operand = Convert.ToString(ci.operand, System.Globalization.CultureInfo.InvariantCulture); break;
                 }
                 sb.Append(ci.opcode.Name).Append(' ').Append(operand);
-                foreach (ExceptionBlock block in ci.blocks) sb.Append(" [").Append(block.blockType).Append(' ').Append(block.catchType?.FullName).Append(']');
+                foreach (ExceptionBlock block in ci.blocks) sb.Append(" [").Append(BlockTypeName(block.blockType)).Append(' ').Append(block.catchType?.FullName).Append(']');
                 sb.Append('\n');
                 if (ci.operand is MethodBase callee && IsCompilerGenerated(callee.DeclaringType, helper)) nested.Add(callee);
             }
@@ -66,16 +66,49 @@ namespace Morgott.Preloader.ModHotspots
             return false;
         }
 
+        private static string BlockTypeName(ExceptionBlockType type) => type switch
+        {
+            ExceptionBlockType.BeginExceptionBlock => nameof(ExceptionBlockType.BeginExceptionBlock),
+            ExceptionBlockType.BeginCatchBlock => nameof(ExceptionBlockType.BeginCatchBlock),
+            ExceptionBlockType.BeginExceptFilterBlock => nameof(ExceptionBlockType.BeginExceptFilterBlock),
+            ExceptionBlockType.BeginFaultBlock => nameof(ExceptionBlockType.BeginFaultBlock),
+            ExceptionBlockType.BeginFinallyBlock => nameof(ExceptionBlockType.BeginFinallyBlock),
+            ExceptionBlockType.EndExceptionBlock => nameof(ExceptionBlockType.EndExceptionBlock),
+            _ => ((int)type).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
         private static string Member(MemberInfo member, Type helper)
         {
             if (member is Type type) return TypeName(type, helper);
             string owner = TypeName(member.DeclaringType, helper);
             if (!(member is MethodBase method)) return owner + "::" + member.Name;
             string generic = method.IsGenericMethod ? "<" + Names(method.GetGenericArguments(), helper) + ">" : "";
-            return owner + "::" + method.Name + generic + "(" + Names(method.GetParameters().Select(p => p.ParameterType), helper) + ")";
+            return owner + "::" + method.Name + generic + "(" + ParameterNames(method.GetParameters(), helper) + ")";
         }
 
-        private static string Names(IEnumerable<Type> types, Type helper) => string.Join(",", types.Select(t => TypeName(t, helper)).ToArray());
+        private static string Names(Type[] types, Type helper)
+        {
+            if (types.Length == 0) return "";
+            var sb = new StringBuilder();
+            for (int i = 0; i < types.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(TypeName(types[i], helper));
+            }
+            return sb.ToString();
+        }
+
+        private static string ParameterNames(ParameterInfo[] parameters, Type helper)
+        {
+            if (parameters.Length == 0) return "";
+            var sb = new StringBuilder();
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(TypeName(parameters[i].ParameterType, helper));
+            }
+            return sb.ToString();
+        }
 
         /// <summary>Assembly-independent type name: generic arguments spelled out (no assembly-qualified names), the
         /// helper's namespace removed, the mod's anonymous types (numbered per assembly) reduced to their arity.</summary>

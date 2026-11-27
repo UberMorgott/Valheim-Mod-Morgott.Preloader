@@ -113,8 +113,7 @@ namespace Morgott.Preloader.Profiling
                 End = now,
                 Tid = Environment.CurrentManagedThreadId,
                 Detail = detail,
-                Args = string.Format(CultureInfo.InvariantCulture, "\"gc0\":{0},\"gc1\":{1},\"gc2\":{2},\"heapMB\":{3:F1}",
-                    GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2), GC.GetTotalMemory(false) / (1024.0 * 1024.0)),
+                Args = $"\"gc0\":{GC.CollectionCount(0).ToString(CultureInfo.InvariantCulture)},\"gc1\":{GC.CollectionCount(1).ToString(CultureInfo.InvariantCulture)},\"gc2\":{GC.CollectionCount(2).ToString(CultureInfo.InvariantCulture)},\"heapMB\":{(GC.GetTotalMemory(false) / (1024.0 * 1024.0)).ToString("F1", CultureInfo.InvariantCulture)}",
             });
         }
 

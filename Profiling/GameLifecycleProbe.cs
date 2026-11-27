@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using Morgott.Preloader.Core;
@@ -103,10 +104,23 @@ namespace Morgott.Preloader.Profiling
 
         public static void Install(Harmony harmony)
         {
+            int hooked = HookAll(harmony, Targets()) + HookAll(harmony, WorldTargets());
+
+            // SceneLoader.Start -> StartLoading -> LoadSceneAsync (SceneLoader.cs:74/118/123): the scene request.
+            MethodInfo sceneLoaderStart = AccessTools.DeclaredMethod(typeof(SceneLoader), "Start");
+            if (sceneLoaderStart != null) harmony.Patch(sceneLoaderStart, prefix: new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), nameof(SceneLoaderStartPrefix))));
+
+            SceneManager.sceneLoaded += OnSceneLoaded;
+            SceneManager.activeSceneChanged += OnActiveSceneChanged;
+            Log.Info($"Game probe: {hooked.ToString(CultureInfo.InvariantCulture)} game methods hooked");
+        }
+
+        private static int HookAll(Harmony harmony, MethodInfo[] methods)
+        {
             int hooked = 0;
-            HarmonyMethod H(string name, int priority) => new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), name), priority);
-            foreach (MethodInfo method in Targets().Concat(WorldTargets()))
+            for (int i = 0; i < methods.Length; i++)
             {
+                MethodInfo method = methods[i];
                 if (method == null)
                 {
                     Log.Warning("Game probe: a target method was not found (game update?), skipped");
@@ -116,15 +130,11 @@ namespace Morgott.Preloader.Profiling
                 harmony.Patch(method, prefix: H(nameof(BodyPrefix), Priority.Last), postfix: H(nameof(BodyPostfix), Priority.First));
                 hooked++;
             }
-
-            // SceneLoader.Start -> StartLoading -> LoadSceneAsync (SceneLoader.cs:74/118/123): the scene request.
-            MethodInfo sceneLoaderStart = AccessTools.DeclaredMethod(typeof(SceneLoader), "Start");
-            if (sceneLoaderStart != null) harmony.Patch(sceneLoaderStart, prefix: new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), nameof(SceneLoaderStartPrefix))));
-
-            SceneManager.sceneLoaded += OnSceneLoaded;
-            SceneManager.activeSceneChanged += OnActiveSceneChanged;
-            Log.Info($"Game probe: {hooked} game methods hooked");
+            return hooked;
         }
+
+        private static HarmonyMethod H(string name, int priority) =>
+            new HarmonyMethod(AccessTools.Method(typeof(GameLifecycleProbe), name), priority);
 
         private static void OuterPrefix()
         {
@@ -147,25 +157,26 @@ namespace Morgott.Preloader.Profiling
             Finish(__originalMethod, "game", OuterSpans.Pop(), __exception != null);
         }
 
+        private static bool IsMethod(MethodBase original, Type type, string name) => original.DeclaringType == type && original.Name == name;
+
         private static void Finish(MethodBase original, string cat, long start, bool failed = false)
         {
             if (start == 0) return;
             long end = StartupTrace.Now();
             StartupTrace.Complete(cat, original.DeclaringType?.Name + "." + original.Name, start, end);
             if (cat != "game") return;
-            bool Is(Type type, string name) => original.DeclaringType == type && original.Name == name;
-            if (!_menuReady && Is(typeof(FejdStartup), "Start"))
+            if (!_menuReady && IsMethod(original, typeof(FejdStartup), "Start"))
             {
                 _menuReady = true;
                 StartupTrace.Mark("main menu ready (FejdStartup.Start end)");
                 Log.Guard("MenuReady handlers", () => MenuReady?.Invoke());
             }
-            else if (Is(typeof(FejdStartup), "OnWorldStart"))
+            else if (IsMethod(original, typeof(FejdStartup), "OnWorldStart"))
             {
                 // OnWorldStart may return early (cloud warning, popups): the last one before LoadMainScene wins.
                 _click = start;
             }
-            else if (Is(typeof(FejdStartup), "LoadMainScene"))
+            else if (IsMethod(original, typeof(FejdStartup), "LoadMainScene"))
             {
                 StartupTrace.Mark(WorldLoadMark);
                 _sceneRequest = StartupTrace.Now();
@@ -174,13 +185,13 @@ namespace Morgott.Preloader.Profiling
                 _awaitMainScene = true;
                 StartEndOfFrame(FejdStartup.instance, MenuFrameRendered);
             }
-            else if (_zoneStart == 0 && _loadMainEnd != 0 && Is(typeof(ZoneSystem), "Start"))
+            else if (_zoneStart == 0 && _loadMainEnd != 0 && IsMethod(original, typeof(ZoneSystem), "Start"))
             {
                 _zoneStart = end;
                 StartupTrace.Mark(ZoneStartMark);
                 EmitWorldLoadSpans();
             }
-            else if (!_worldReady && !failed && Is(typeof(Game), "SpawnPlayer"))
+            else if (!_worldReady && !failed && IsMethod(original, typeof(Game), "SpawnPlayer"))
             {
                 _worldReady = true;
                 StartupTrace.Mark(WorldReadyMark);
@@ -197,7 +208,7 @@ namespace Morgott.Preloader.Profiling
         private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             if (!StartupTrace.Recording) return;
-            StartupTrace.Mark("scene loaded: " + scene.name, mode.ToString());
+            StartupTrace.Mark("scene loaded: " + scene.name, mode == LoadSceneMode.Additive ? "Additive" : "Single");
             if (_awaitMainScene)
             {
                 // Sync LoadScene: every Awake of the new scene ran before sceneLoaded; Start/Update/render follow.

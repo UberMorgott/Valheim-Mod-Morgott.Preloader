@@ -41,41 +41,59 @@ namespace Morgott.Preloader.Profiling
 
         private static void Prefix(out long __state) => __state = StartupTrace.Recording ? StartupTrace.Now() : 0;
 
-        private static void FilePostfix(long __state, string path) => Record(__state, "LoadFromFile", path, () => FileSize(path), null);
+        private static void FilePostfix(long __state, string path)
+        {
+            if (__state != 0) Record(__state, "LoadFromFile", path, FileSize(path), null);
+        }
 
-        private static void FileAsyncPostfix(long __state, string path, AssetBundleCreateRequest __result) =>
-            Record(__state, "LoadFromFileAsync", path, () => FileSize(path), __result);
+        private static void FileAsyncPostfix(long __state, string path, AssetBundleCreateRequest __result)
+        {
+            if (__state != 0) Record(__state, "LoadFromFileAsync", path, FileSize(path), __result);
+        }
 
-        private static void MemoryPostfix(long __state, byte[] binary) => Record(__state, "LoadFromMemory", null, () => binary?.LongLength ?? -1, null);
+        private static void MemoryPostfix(long __state, byte[] binary)
+        {
+            if (__state != 0) Record(__state, "LoadFromMemory", null, binary?.LongLength ?? -1, null);
+        }
 
-        private static void MemoryAsyncPostfix(long __state, byte[] binary, AssetBundleCreateRequest __result) =>
-            Record(__state, "LoadFromMemoryAsync", null, () => binary?.LongLength ?? -1, __result);
+        private static void MemoryAsyncPostfix(long __state, byte[] binary, AssetBundleCreateRequest __result)
+        {
+            if (__state != 0) Record(__state, "LoadFromMemoryAsync", null, binary?.LongLength ?? -1, __result);
+        }
 
-        private static void StreamPostfix(long __state, Stream stream) => Record(__state, "LoadFromStream", (stream as FileStream)?.Name, () => StreamSize(stream), null);
+        private static void StreamPostfix(long __state, Stream stream)
+        {
+            if (__state != 0) Record(__state, "LoadFromStream", (stream as FileStream)?.Name, StreamSize(stream), null);
+        }
 
-        private static void StreamAsyncPostfix(long __state, Stream stream, AssetBundleCreateRequest __result) =>
-            Record(__state, "LoadFromStreamAsync", (stream as FileStream)?.Name, () => StreamSize(stream), __result);
+        private static void StreamAsyncPostfix(long __state, Stream stream, AssetBundleCreateRequest __result)
+        {
+            if (__state != 0) Record(__state, "LoadFromStreamAsync", (stream as FileStream)?.Name, StreamSize(stream), __result);
+        }
 
         /// <summary>Span start..now (0 = not recording); the size is read after the end time, only for a recorded load.</summary>
-        private static void Record(long start, string kind, string path, Func<long> bytes, AssetBundleCreateRequest request)
+        private static void Record(long start, string kind, string path, long size, AssetBundleCreateRequest request)
         {
-            if (start == 0) return;
             long end = StartupTrace.Now();
             try
             {
                 string name = path != null ? Path.GetFileName(path) : "<" + kind + ">";
-                long size = bytes();
                 StartupTrace.Complete("bundle", name, start, end, path, kind, size);
                 if (request != null)
                 {
-                    request.completed += _ => StartupTrace.Complete("bundle.async", name, start, StartupTrace.Now(),
-                        path, kind + " (request -> completed)", size, StartupTrace.LaneAsyncBundles);
+                    request.completed += new AsyncCompletion(name, start, path, kind + " (request -> completed)", size).OnCompleted;
                 }
             }
             catch (Exception e)
             {
                 Log.Error($"Bundle profiler: {e}");
             }
+        }
+
+        private sealed class AsyncCompletion(string name, long start, string path, string detail2, long size)
+        {
+            public void OnCompleted(AsyncOperation _) =>
+                StartupTrace.Complete("bundle.async", name, start, StartupTrace.Now(), path, detail2, size, StartupTrace.LaneAsyncBundles);
         }
         private static long FileSize(string path)
         {

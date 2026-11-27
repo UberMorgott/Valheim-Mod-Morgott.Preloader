@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -140,11 +141,25 @@ internal static class EagerBuilder
     {
         lock (Jobs)
         {
-            int done = Jobs.Values.Count(j => j.State == JobState.Done);
-            int failed = Jobs.Values.Count(j => j.State == JobState.Failed);
-            double mb = Jobs.Values.Where(j => j.State == JobState.Done).Sum(j => j.DataSize) / (1024.0 * 1024.0);
-            return $"BundleCache eager: {Jobs.Count} LZMA bundles found, {done} built ({mb:F0} MB) on {_workers} threads, {failed} failed, " +
-                   $"{Jobs.Count - done - failed} still running; {_waitHits} loads waited {_waitedMs:F0} ms for a copy, {_skippedWaits} loaded the original";
+            int done = 0;
+            int failed = 0;
+            long doneBytes = 0;
+            foreach (Job j in Jobs.Values)
+            {
+                if (j.State == JobState.Done)
+                {
+                    done++;
+                    doneBytes += j.DataSize;
+                }
+                else if (j.State == JobState.Failed)
+                {
+                    failed++;
+                }
+            }
+            double mb = doneBytes / (1024.0 * 1024.0);
+            int running = Jobs.Count - done - failed;
+            return $"BundleCache eager: {Jobs.Count.ToString(CultureInfo.InvariantCulture)} LZMA bundles found, {done.ToString(CultureInfo.InvariantCulture)} built ({mb.ToString("F0", CultureInfo.InvariantCulture)} MB) on {_workers.ToString(CultureInfo.InvariantCulture)} threads, {failed.ToString(CultureInfo.InvariantCulture)} failed, " +
+                   $"{running.ToString(CultureInfo.InvariantCulture)} still running; {_waitHits.ToString(CultureInfo.InvariantCulture)} loads waited {_waitedMs.ToString("F0", CultureInfo.InvariantCulture)} ms for a copy, {_skippedWaits.ToString(CultureInfo.InvariantCulture)} loaded the original";
         }
     }
 
@@ -190,18 +205,25 @@ internal static class EagerBuilder
             }
         }
         found.Sort((a, b) => b.DataSize.CompareTo(a.DataSize));
+        long foundBytes = 0;
         lock (Jobs)
         {
-            foreach (Job job in found.Where(j => !Jobs.ContainsKey(j.FileName)))
+            for (int i = 0; i < found.Count; i++)
             {
-                Jobs[job.FileName] = job;
-                Queue.Add(job);
+                Job job = found[i];
+                foundBytes += job.DataSize;
+                if (!Jobs.ContainsKey(job.FileName))
+                {
+                    Jobs[job.FileName] = job;
+                    Queue.Add(job);
+                }
             }
             _scanDone = true;
         }
         _workers = Math.Min(Math.Max(1, Math.Min(Environment.ProcessorCount - 2, 6)), Math.Max(1, Queue.Count));
-        Log.Info($"BundleCache eager: scan {Clock.ElapsedMilliseconds} ms, {Queue.Count} LZMA bundles without a copy " +
-                 $"({found.Sum(j => j.DataSize) / (1024.0 * 1024.0):F0} MB), {(Queue.Count > 0 ? _workers : 0)} worker threads");
+        int workerCount = Queue.Count > 0 ? _workers : 0;
+        Log.Info($"BundleCache eager: scan {Clock.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)} ms, {Queue.Count.ToString(CultureInfo.InvariantCulture)} LZMA bundles without a copy " +
+                 $"({(foundBytes / (1024.0 * 1024.0)).ToString("F0", CultureInfo.InvariantCulture)} MB), {workerCount.ToString(CultureInfo.InvariantCulture)} worker threads");
         if (Queue.Count == 0)
         {
             return;
@@ -270,7 +292,7 @@ internal static class EagerBuilder
         file.Position = r.ReadInt32();
         if (r.ReadUInt32() != 0x00004550)
         {
-            throw new BadImageFormatException("no PE signature");
+            throw new InvalidDataException("no PE signature");
         }
         r.ReadUInt16();
         int sections = r.ReadUInt16();
@@ -296,7 +318,7 @@ internal static class EagerBuilder
                     return rawPointer + (rva - virtualAddress);
                 }
             }
-            throw new BadImageFormatException("RVA outside every section");
+            throw new InvalidDataException("RVA outside every section");
         }
         file.Position = Map(cliRva) + 24;
         return Map(r.ReadUInt32());
@@ -325,7 +347,7 @@ internal static class EagerBuilder
             {
                 using (var file = new FileStream(job.Dll, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 16))
                 {
-                    BundleConverter.Convert(new SliceStream(file, job.Start, job.Length), job.Source, temp, n => Interlocked.Exchange(ref job.Progress, n));
+                    BundleConverter.Convert(new SliceStream(file, job.Start, job.Length), job.Source, temp, job.RecordProgress);
                 }
                 problem = Validate(temp, job.Source);
                 if (problem == null)
@@ -361,7 +383,7 @@ internal static class EagerBuilder
             }
             else if (Config.ProfilerEnabled?.Value == true)
             {
-                Log.Info($"BundleCache eager: {job.Label} {job.DataSize / (1024.0 * 1024.0):F1} MB in {job.Watch.ElapsedMilliseconds} ms (t={Clock.ElapsedMilliseconds} ms)");
+                Log.Info($"BundleCache eager: {job.Label} {(job.DataSize / (1024.0 * 1024.0)).ToString("F1", CultureInfo.InvariantCulture)} MB in {job.Watch.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)} ms (t={Clock.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)} ms)");
             }
         }
     }
@@ -428,6 +450,8 @@ internal static class EagerBuilder
         public long DataSize;
         public long Progress;
         public volatile JobState State;
+
+        public void RecordProgress(long n) => Interlocked.Exchange(ref Progress, n);
     }
 
     /// <summary>Read-only window of a file (one manifest resource), position 0 = resource start.</summary>
